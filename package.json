@@ -1,0 +1,7 @@
+{
+  "name": "signal",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}
