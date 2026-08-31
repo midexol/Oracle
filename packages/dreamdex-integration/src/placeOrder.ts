@@ -1,4 +1,5 @@
 import type { SomniaMarkets, UnifiedOrder } from "@somnia-chain/markets-sdk";
+import { loadConfig } from "./config.js";
 
 export type PredictionSide = "UP" | "DOWN";
 
@@ -10,6 +11,8 @@ export interface BackPredictionArgs {
   usdStake: number;
   /** Max acceptable slippage past the best opposite price, as a fraction (0.02 = 2%). */
   slippage?: number;
+  /** Defaults to the DRY_RUN env var (see config.ts) — logs the order instead of sending it. */
+  dryRun?: boolean;
 }
 
 // This is "BACK THIS PREDICTION": a taker market order on the corresponding
@@ -19,8 +22,11 @@ export interface BackPredictionArgs {
 // The exchange passed in must already carry a signer (walletClient for a
 // browser flow, or a privateKey for a server/test flow) — see client.ts.
 // createOrder throws SignerRequiredError otherwise.
-export async function backPrediction(exchange: SomniaMarkets, args: BackPredictionArgs): Promise<UnifiedOrder> {
-  const { symbol, side, usdStake, slippage = 0.02 } = args;
+export async function backPrediction(
+  exchange: SomniaMarkets,
+  args: BackPredictionArgs,
+): Promise<UnifiedOrder | { dryRun: true; tradable: string; side: "buy"; quantity: number; referencePrice: number }> {
+  const { symbol, side, usdStake, slippage = 0.02, dryRun = loadConfig().dryRun } = args;
   const outcome = side === "UP" ? "YES" : "NO";
   const tradable = `${symbol}#${outcome}`;
 
@@ -30,6 +36,11 @@ export async function backPrediction(exchange: SomniaMarkets, args: BackPredicti
     throw new Error(`${tradable} has no fills yet — cannot size a $-denominated stake without a reference price`);
   }
   const quantity = usdStake / referencePrice;
+
+  if (dryRun) {
+    console.log(`[DRY_RUN] would buy ${quantity} of ${tradable} @ ~${referencePrice} (slippage ${slippage})`);
+    return { dryRun: true, tradable, side: "buy", quantity, referencePrice };
+  }
 
   return exchange.createOrder(tradable, "market", "buy", quantity, undefined, { slippage });
 }
