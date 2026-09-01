@@ -156,3 +156,63 @@ describe('SettlementWorker.resolveMarket', () => {
     await expect(worker.resolveMarket('', 'UP')).rejects.toThrow();
   });
 });
+
+describe('SettlementWorker.voidMarket', () => {
+  let fakePrisma: ReturnType<typeof createFakePrisma>;
+
+  beforeEach(() => {
+    fakePrisma = createFakePrisma([
+      {
+        id: 'p1',
+        userId: 'user-1',
+        marketId: 'market-A',
+        asset: 'BTC',
+        duration: '15M',
+        prediction: 'UP',
+        entryPrice: 0.43,
+        status: 'PENDING',
+        result: null,
+        resolvedAt: null,
+      },
+      {
+        id: 'p2',
+        userId: 'user-2',
+        marketId: 'market-B',
+        asset: 'ETH',
+        duration: '1H',
+        prediction: 'DOWN',
+        entryPrice: 0.6,
+        status: 'PENDING',
+        result: null,
+        resolvedAt: null,
+      },
+    ]);
+  });
+
+  it('marks only PENDING predictions for the voided market as CANCELLED', async () => {
+    const worker = new SettlementWorker(fakePrisma);
+    const summary = await worker.voidMarket('market-A');
+
+    expect(summary.voidedCount).toBe(1);
+
+    const p1 = fakePrisma._internal.predictions.get('p1');
+    const p2 = fakePrisma._internal.predictions.get('p2');
+
+    expect(p1.status).toBe('RESOLVED');
+    expect(p1.result).toBe('CANCELLED');
+    // Untouched — different market
+    expect(p2.status).toBe('PENDING');
+  });
+
+  it('does not record a win or loss for a voided prediction', async () => {
+    const worker = new SettlementWorker(fakePrisma);
+    await worker.voidMarket('market-A');
+
+    expect(fakePrisma._internal.analytics.get('user-1')).toBeUndefined();
+  });
+
+  it('throws if marketId is empty', async () => {
+    const worker = new SettlementWorker(fakePrisma);
+    await expect(worker.voidMarket('')).rejects.toThrow();
+  });
+});
