@@ -13,12 +13,18 @@ export interface SettlementSummary {
   losers: number;
 }
 
+export interface VoidSummary {
+  marketId: string;
+  voidedCount: number;
+}
+
 /**
  * Mockable interface — inject a fake implementation in tests, or the real
  * PrismaClient-backed one in production / the blockchain event listener.
  */
 export interface ISettlementWorker {
   resolveMarket(marketId: string, winningOutcome: PredictionDirection): Promise<SettlementSummary>;
+  voidMarket(marketId: string): Promise<VoidSummary>;
 }
 
 export class SettlementWorker implements ISettlementWorker {
@@ -77,6 +83,35 @@ export class SettlementWorker implements ISettlementWorker {
         winners,
         losers,
       };
+    });
+  }
+
+  /**
+   * Marks every PENDING prediction for a voided market as CANCELLED, with no
+   * win/loss recorded — mirrors DreamDEX's on-chain 0.5/0.5 voided-market
+   * payout, which is neither a win nor a loss (see CLAUDE.md). CANCELLED
+   * predictions never reach `updateUserStats`.
+   */
+  async voidMarket(marketId: string): Promise<VoidSummary> {
+    if (!marketId) throw new Error('voidMarket: marketId is required');
+
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const pending = await tx.prediction.findMany({
+        where: { marketId, status: 'PENDING' as PredictionStatus },
+      });
+
+      for (const p of pending) {
+        await tx.prediction.update({
+          where: { id: p.id },
+          data: {
+            status: 'RESOLVED',
+            result: 'CANCELLED' as PredictionResult,
+            resolvedAt: new Date(),
+          },
+        });
+      }
+
+      return { marketId, voidedCount: pending.length };
     });
   }
 }
