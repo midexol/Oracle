@@ -191,6 +191,30 @@ export async function applyOrderFilled(event: OrderFilledEvent): Promise<string 
 }
 
 /**
+ * A voided contract returns everyone's stake.
+ *
+ * DreamDEX redeems complete sets at par on a void, so the economic result is
+ * exactly zero - not a loss, and not unknown. Without this, positions on a
+ * cancelled market keep `realized_pnl = NULL` forever, which reads downstream
+ * as "not yet settled" and quietly understates a user's realised total.
+ */
+export async function voidTradesForMarket(marketId: string): Promise<number> {
+  const rows = await db
+    .update(trades)
+    .set({ realizedPnl: '0', updatedAt: new Date() })
+    .where(
+      and(
+        eq(trades.marketId, marketId),
+        inArray(trades.status, ['FILLED', 'PARTIALLY_FILLED']),
+        sql`${trades.realizedPnl} IS NULL`,
+      ),
+    )
+    .returning({ id: trades.id });
+
+  return rows.length;
+}
+
+/**
  * Realise PnL on every filled position in a settled market.
  *
  * A winning contract pays 100c; a losing one pays nothing. PnL is stored in

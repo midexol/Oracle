@@ -1,0 +1,43 @@
+# Local stack: Postgres plus the backend, for running the whole thing without
+# installing anything but Docker.
+#
+#   docker compose up --build
+#   docker compose run --rm backend npm run db:migrate:prod
+#   docker compose run --rm backend npm run db:seed
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: oracle
+      POSTGRES_PASSWORD: oracle
+      POSTGRES_DB: oracle
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U oracle']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: packages/oracle-backend/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: '4000'
+      DATABASE_URL: postgresql://oracle:oracle@postgres:5432/oracle
+      # Override for a real deployment. This default exists so the stack boots.
+      JWT_SECRET: local-development-secret-at-least-32-chars
+      # The simulator: the full loop runs with no testnet funds or network.
+      DREAMDEX_MODE: mock
+    ports:
+      - '4000:4000'
+
+volumes:
+  pgdata:

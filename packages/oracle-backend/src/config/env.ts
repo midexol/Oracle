@@ -20,17 +20,20 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('7d'),
   AUTH_DOMAIN: z.string().default('oracle.local'),
 
+  /**
+   * 'mock' runs the built-in simulator; 'live' talks to DreamDEX through
+   * @signal/dreamdex-integration.
+   *
+   * Everything else about the live connection - network, indexer URL,
+   * contract addresses, DRY_RUN - is that package's config (NETWORK,
+   * DREAMDEX_INDEXER_URL, DREAMDEX_WS_RPC_URL, DRY_RUN), deliberately not
+   * duplicated here. Two competing sets of connection settings is how a
+   * backend ends up pointed at two different chains at once.
+   */
   DREAMDEX_MODE: z.enum(['mock', 'live']).default('mock'),
-  DREAMDEX_REST_URL: z.string().optional(),
-  DREAMDEX_WS_URL: z.string().optional(),
-  DREAMDEX_API_KEY: z.string().optional(),
   /** Simulator wall-clock compression; 20 makes a 15M contract settle in 45s. */
   MOCK_TIME_SCALE: z.coerce.number().positive().default(20),
 
-  SOMNIA_CHAIN_ID: z.coerce.number().int().default(50312),
-  SOMNIA_RPC_URL: z.string().default('https://dream-rpc.somnia.network'),
-  SOMNIA_WS_RPC_URL: z.string().optional(),
-  DREAMDEX_EXCHANGE_ADDRESS: z.string().optional(),
 
   ENABLE_JOBS: bool(true),
   MARKET_SYNC_INTERVAL_MS: z.coerce.number().int().positive().default(5000),

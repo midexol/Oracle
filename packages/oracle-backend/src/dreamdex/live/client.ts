@@ -1,7 +1,9 @@
 import {
   backPrediction,
+  cancelOrderById,
   closeExchange,
   createExchange,
+  getOrder as fetchOrderById,
   getSettlement,
   listEventContracts,
   subscribeOrderBook,
@@ -60,6 +62,8 @@ export class LiveDreamDexClient implements DreamDexClient {
   private books = new Map<string, OrderBookSubscription>();
   private settlements = new Map<string, SettlementSubscription>();
   private discoverTimer: NodeJS.Timeout | null = null;
+  private contracts = new Map<string, EventContract>();
+  private contractsFetchedAt = 0;
 
   constructor(
     private readonly config: {
@@ -127,10 +131,18 @@ export class LiveDreamDexClient implements DreamDexClient {
     const found = contracts.find((c) => c.symbol === marketId);
     if (!found) return null;
 
-    // The contract list carries the live quote but not the resolved outcome,
-    // so read settlement separately and merge it in.
-    const settlement = await getSettlement(this.requireExchange(), marketId as Hex);
-    return toMarket(found, settlement);
+    // The indexed row already carries the resolution, so no extra call is
+    // needed in the common case. Only fall back to an on-chain read when the
+    // indexer has not caught up yet.
+    if (found.winningOutcome != null || found.voided) return toMarket(found);
+    if (!found.marketId) return toMarket(found);
+
+    // NOTE: settlement reads take the bytes32 marketId, NOT the symbol. They
+    // are different identifiers; passing the symbol here silently fails.
+    const settlement = await getSettlement(this.requireExchange(), found.marketId).catch(
+      () => null,
+    );
+    return toMarket(found, settlement ?? undefined);
   }
 
   async getOrderBook(marketId: string, depth = 10): Promise<OrderBook | null> {
@@ -182,12 +194,18 @@ export class LiveDreamDexClient implements DreamDexClient {
     const priceCents = req.priceCents ?? 50;
     const usdStake = Number(req.quantity) * (priceCents / 100);
 
+    // Which outcome token means "up" is a property of this market's question,
+    // not a constant. Reading it from the contract keeps a "will X close
+    // BELOW y?" market from routing every UP order into the losing side.
+    const contract = await this.findContract(req.marketId);
+
     try {
       const result = await backPrediction(exchange, {
         symbol: req.marketId,
         side: req.side,
         usdStake,
         slippage: this.config.slippage ?? 0.02,
+        upOutcome: contract?.upOutcome ?? 'YES',
       });
 
       // DRY_RUN is on by default in the integration package's config. Surface
@@ -208,7 +226,7 @@ export class LiveDreamDexClient implements DreamDexClient {
       return {
         orderId: String(result.id),
         clientOrderId: req.clientOrderId,
-        status: mapOrderStatus(result.status),
+        status: mapOrderStatus(result.status, result.filled, result.amount),
         filledQuantity: String(result.filled ?? 0),
         averagePriceCents: result.price != null ? toCents(result.price) : null,
         txHash: result.txHash ?? null,
@@ -232,69 +250,38 @@ export class LiveDreamDexClient implements DreamDexClient {
    * orders first and take the symbol from there.
    */
   async cancelOrder(orderId: string): Promise<boolean> {
-    const exchange = this.requireExchange();
-    const open = await exchange.fetchOpenOrders();
-    const match = open.find((o) => o.id === orderId);
-    if (!match) return false;
-
-    await exchange.cancelOrder(orderId, match.symbol);
-    return true;
+    return cancelOrderById(this.requireExchange(), orderId);
   }
 
   /**
    * Order lookup for the reconciler.
    *
-   * The SDK exposes `fetchOpenOrders`, not a fetch-by-id, and that asymmetry
-   * matters here. If the order is still resting we can report it exactly. If
-   * it is absent we cannot distinguish "filled and closed" from "never
-   * existed" - and those demand opposite actions on real money.
-   *
-   * So we throw rather than return null. The reconciler treats a throw as
-   * transient and leaves the trade PENDING, which is the safe direction to be
-   * wrong in: a position that shows as pending can be repaired, one wrongly
-   * marked FAILED has already lied to the user about their money.
-   *
-   * To close this properly, add a fetch-by-id to
-   * `@signal/dreamdex-integration` that can positively report a closed order.
+   * Backed by the indexer's full order history, not just resting orders, so
+   * an absent order is a positive "no such order" rather than the ambiguous
+   * "not currently open". That distinction is what lets the reconciler mark a
+   * dead order FAILED without risking abandoning a live position.
    */
   async getOrder(orderId: string): Promise<OrderStatus | null> {
-    const exchange = this.requireExchange();
-    const open = await exchange.fetchOpenOrders();
-    const match = open.find((o) => o.id === orderId);
-
-    if (!match) {
-      throw upstreamError(
-        `Order ${orderId} is not among the open orders, and DreamDEX exposes no ` +
-          `fetch-by-id - cannot tell a filled order from an unknown one. ` +
-          `Leaving the trade untouched.`,
-      );
-    }
-
-    const priceCents = match.price != null ? toCents(match.price) : 50;
-    return {
-      orderId: match.id,
-      clientOrderId: '',
-      marketId: match.symbol.replace(/#(YES|NO)$/, ''),
-      side: match.symbol.endsWith('#NO') ? 'DOWN' : 'UP',
-      quantity: String(match.amount),
-      status: mapOrderStatus(match.status),
-      filledQuantity: String(match.filled ?? 0),
-      averagePriceCents: priceCents,
-      txHash: match.txHash ?? null,
-    };
+    const match = await fetchOrderById(this.requireExchange(), orderId);
+    if (!match) return null;
+    return toOrderStatus(match);
   }
 
   /**
    * Unavailable, and not fakeable: the SDK accepts no client order id, so
-   * there is nothing on the exchange side carrying our id to look up. This is
-   * also why `trades.idempotency_key` is enforced in our own database rather
-   * than delegated to the exchange.
+   * nothing on the exchange side carries our id to look up. This is exactly
+   * why `trades.idempotency_key` is enforced in our own database rather than
+   * delegated to the exchange.
+   *
+   * Throwing (not returning null) is deliberate — the reconciler treats a
+   * throw as transient and leaves the trade PENDING, whereas null would let
+   * it eventually mark a possibly-live order FAILED.
    */
   async getOrderByClientOrderId(_clientOrderId: string): Promise<OrderStatus | null> {
     throw notExposed(
       'getOrderByClientOrderId',
-      'a lookup keyed by our own id - the SDK accepts no client order id today, so this ' +
-        'likely means correlating on wallet + symbol + timestamp',
+      'a lookup keyed by our own id - the SDK accepts no client order id, so this would ' +
+        'mean correlating on wallet + symbol + timestamp',
     );
   }
 
@@ -304,6 +291,25 @@ export class LiveDreamDexClient implements DreamDexClient {
   private async discover(): Promise<void> {
     const exchange = this.requireExchange();
     const contracts = await listEventContracts(exchange);
+    this.contracts = new Map(contracts.map((c) => [c.symbol, c]));
+    this.contractsFetchedAt = Date.now();
+
+    // A market whose question we could not parse is one where UP/DOWN may be
+    // inverted - which would flip every prediction on it. Surface it loudly
+    // rather than letting it settle silently.
+    for (const c of contracts) {
+      if (c.upOutcomeAssumed && c.status !== 'unknown') {
+        this.emit((h) =>
+          h.onError?.(
+            new Error(
+              `Cannot tell which outcome means UP for ${c.symbol} (question: ` +
+                `"${c.question || 'none'}") - assuming YES==UP. Confirm before trusting ` +
+                `settled results on this market.`,
+            ),
+          ),
+        );
+      }
+    }
 
     for (const contract of contracts) {
       const market = toMarket(contract);
@@ -334,10 +340,25 @@ export class LiveDreamDexClient implements DreamDexClient {
         );
       }
 
+      // Settlement reads take the bytes32 market id. A market we cannot
+      // address that way cannot be watched, and silently skipping it would
+      // strand every prediction on it - so say so.
+      if (!contract.marketId) {
+        this.emit((h) =>
+          h.onError?.(
+            new Error(
+              `Contract ${contract.symbol} has no on-chain marketId; settlement cannot be watched`,
+            ),
+          ),
+        );
+        continue;
+      }
+
       if (!this.settlements.has(contract.symbol)) {
+        const marketId = contract.marketId;
         this.settlements.set(
           contract.symbol,
-          watchSettlement(exchange, contract.symbol as Hex, (result) => {
+          watchSettlement(exchange, marketId, (result) => {
             this.settlements.delete(contract.symbol);
 
             if (result.state === 'voided') {
@@ -345,15 +366,15 @@ export class LiveDreamDexClient implements DreamDexClient {
               return;
             }
 
-            // KNOWN UNKNOWN (CLAUDE.md): YES == UP is assumed, not yet
-            // confirmed against a real market's `question` field. If that
-            // turns out to be inverted, every settled prediction flips - so
-            // confirm before trusting a live leaderboard.
+            // Which outcome token means UP is a property of this market's
+            // question, resolved by the integration package. Assuming YES==UP
+            // globally would invert every prediction on a "will X close
+            // BELOW y?" contract.
             this.emit((h) =>
               h.onMarketSettled?.({
                 marketId: contract.symbol,
-                outcome: result.winningOutcome === 'YES' ? 'UP' : 'DOWN',
-                closingReference: null,
+                outcome: result.winningOutcome === contract.upOutcome ? 'UP' : 'DOWN',
+                closingReference: contract.strike,
                 settledAt: new Date().toISOString(),
               }),
             );
@@ -361,6 +382,24 @@ export class LiveDreamDexClient implements DreamDexClient {
         );
       }
     }
+  }
+
+  /**
+   * One contract by symbol, from a short-lived cache.
+   *
+   * `listEventContracts` fetches a ticker per market, so calling it on the
+   * order path would put an N-request round trip in front of every trade. The
+   * fields we need from it - upOutcome, marketId, strike - are immutable for
+   * the life of a contract, so a brief cache costs nothing in correctness.
+   */
+  private async findContract(symbol: string): Promise<EventContract | null> {
+    const fresh = Date.now() - this.contractsFetchedAt < CONTRACT_CACHE_MS;
+    if (!fresh || !this.contracts.has(symbol)) {
+      const contracts = await listEventContracts(this.requireExchange());
+      this.contracts = new Map(contracts.map((c) => [c.symbol, c]));
+      this.contractsFetchedAt = Date.now();
+    }
+    return this.contracts.get(symbol) ?? null;
   }
 
   private requireExchange(): SomniaMarkets {
@@ -384,39 +423,80 @@ export class LiveDreamDexClient implements DreamDexClient {
 // -------------------------------------------------------------------- helpers
 
 /** Probability fraction (0..1) -> integer cents, clamped to a tradeable 1..99. */
+/** Contract metadata is immutable, so this only bounds staleness of new listings. */
+const CONTRACT_CACHE_MS = 30_000;
+
 const toCents = (price: number): number =>
   Math.min(99, Math.max(1, Math.round(price * 100)));
 
-function toMarket(
+export function toMarket(
   contract: EventContract,
   settlement?: { state: 'pending' | 'resolved' | 'voided'; winningOutcome?: 'YES' | 'NO' },
 ): DreamDexMarket {
   const upPriceCents = contract.upPrice != null ? toCents(contract.upPrice) : 50;
+  const opensAt = contract.tradingStart > 0 ? new Date(contract.tradingStart * 1000) : new Date();
   const closesAt = new Date(contract.expiry * 1000);
 
   let status: DreamDexMarket['status'] = mapMarketStatus(contract.status, closesAt);
   let outcome: DreamDexMarket['outcome'] = null;
+  let settledAt: string | null = contract.resolvedAt
+    ? new Date(contract.resolvedAt * 1000).toISOString()
+    : null;
 
-  if (settlement?.state === 'voided') {
+  // Prefer the indexed resolution; fall back to an explicit on-chain read.
+  // `winningOutcome` is 0 = YES, 1 = NO; which of those is UP depends on the
+  // market's own question, so compare against contract.upOutcome.
+  const upIsYes = contract.upOutcome === 'YES';
+
+  if (contract.voided || settlement?.state === 'voided') {
     status = 'CANCELLED';
+  } else if (contract.winningOutcome != null) {
+    status = 'SETTLED';
+    outcome = (contract.winningOutcome === 0) === upIsYes ? 'UP' : 'DOWN';
+    settledAt ??= new Date().toISOString();
   } else if (settlement?.state === 'resolved') {
     status = 'SETTLED';
-    outcome = settlement.winningOutcome === 'YES' ? 'UP' : 'DOWN';
+    outcome = settlement.winningOutcome === contract.upOutcome ? 'UP' : 'DOWN';
+    settledAt ??= new Date().toISOString();
   }
 
   return {
     marketId: contract.symbol,
     asset: normalizeAsset(contract.asset),
     duration: inferDuration(contract),
-    openingReference: null,
+    // The strike is the level the question resolves against - exactly what
+    // the PRD calls the opening reference.
+    openingReference: contract.strike,
     closingReference: null,
     status,
     outcome,
     upPriceCents,
     downPriceCents: 100 - upPriceCents,
-    opensAt: new Date().toISOString(),
+    opensAt: opensAt.toISOString(),
     closesAt: closesAt.toISOString(),
-    settledAt: status === 'SETTLED' ? new Date().toISOString() : null,
+    settledAt: status === 'SETTLED' ? settledAt : null,
+  };
+}
+
+function toOrderStatus(order: {
+  id: string;
+  symbol: string;
+  price?: number;
+  amount: number;
+  filled: number;
+  status: string;
+  txHash?: string;
+}): OrderStatus {
+  return {
+    orderId: order.id,
+    clientOrderId: '',
+    marketId: order.symbol.replace(/#(YES|NO)$/, ''),
+    side: order.symbol.endsWith('#NO') ? 'DOWN' : 'UP',
+    quantity: String(order.amount),
+    status: mapOrderStatus(order.status, order.filled, order.amount),
+    filledQuantity: String(order.filled ?? 0),
+    averagePriceCents: order.price != null ? toCents(order.price) : null,
+    txHash: order.txHash ?? null,
   };
 }
 
@@ -435,40 +515,77 @@ function mapMarketStatus(status: string, closesAt: Date): DreamDexMarket['status
   return 'OPEN';
 }
 
-function mapOrderStatus(status: string | undefined): PlaceOrderResult['status'] {
+/**
+ * Map an SDK order state onto Oracle's.
+ *
+ * The fill quantity is part of the decision, not decoration. The SDK's
+ * vocabulary is "open" | "closed" | "canceled" | "expired", and none of those
+ * words say whether anything actually traded - "closed" covers both a
+ * complete fill and an order that left the book having done nothing.
+ *
+ * Two rules:
+ *  - Any TERMINAL state with a fill is FILLED. The position is real and final;
+ *    `filledQuantity` carries its true size, and PnL is computed from that, so
+ *    a partially-filled-then-cancelled order settles for exactly what it got.
+ *  - Any terminal state with no fill is CANCELLED.
+ *
+ * The reconciler polls PENDING and PARTIALLY_FILLED, so mapping a terminal
+ * state into either of those would leave it polling that order forever - which
+ * is what "expired" did before it was handled here.
+ */
+export function mapOrderStatus(
+  status: string | undefined,
+  filled = 0,
+  amount = 0,
+): PlaceOrderResult['status'] {
+  const hasFill = filled > 0;
+
   switch ((status ?? '').toLowerCase()) {
+    case 'open':
+      return hasFill ? 'PARTIALLY_FILLED' : 'PENDING';
     case 'closed':
     case 'filled':
-      return 'FILLED';
+      return hasFill || amount === 0 ? 'FILLED' : 'CANCELLED';
     case 'canceled':
     case 'cancelled':
-      return 'CANCELLED';
+    case 'expired':
+      return hasFill ? 'FILLED' : 'CANCELLED';
     case 'rejected':
       return 'FAILED';
     default:
-      return 'PENDING';
+      // An unrecognised state is not evidence of anything terminal. Staying
+      // PENDING keeps the order under reconciliation rather than declaring an
+      // outcome we cannot support.
+      return hasFill ? 'PARTIALLY_FILLED' : 'PENDING';
   }
 }
 
 /**
  * Map a contract onto Oracle's duration buckets.
  *
- * MODELLING GAP, flagged rather than papered over: real DreamDEX Event
- * Contracts are strike-and-expiry based ("BTC-95000-31DEC26"), while the PRD
- * assumes rolling tenors ("BTC 15M"). Per-segment reputation - the
- * "BTC 15M accuracy: 81%" that makes the feed persuasive - depends on this
- * bucketing being meaningful, so it needs a product decision, not a guess.
- * Time-to-expiry is the least-wrong stand-in until then.
+ * Measured across the contract's OWN window (tradingStart -> expiry), which is
+ * its real tenor and is fixed for the life of the market. An earlier version
+ * used time-remaining, which meant the same contract drifted 1H -> 15M -> 1M
+ * as it aged, scattering one market's calls across three different segments
+ * and corrupting the per-segment accuracy the feed is sold on.
+ *
+ * Still an approximation: real Event Contracts are strike-and-expiry
+ * ("BTC-95000-31DEC26"), while the PRD assumes rolling tenors ("BTC 15M").
+ * Bucketing by window length is the faithful reading of that, but if the live
+ * venue turns out to list only long-dated contracts, the product needs to
+ * decide what "BTC 15M accuracy" should mean rather than have this guess.
  */
-function inferDuration(contract: EventContract): Duration {
-  const msToExpiry = contract.expiry * 1000 - Date.now();
-  const minutes = msToExpiry / 60_000;
+export function inferDuration(contract: EventContract): Duration {
+  const windowMinutes =
+    contract.tradingStart > 0 && contract.expiry > contract.tradingStart
+      ? (contract.expiry - contract.tradingStart) / 60
+      : (contract.expiry * 1000 - Date.now()) / 60_000;
 
-  if (minutes <= 3) return '1M';
-  if (minutes <= 10) return '5M';
-  if (minutes <= 40) return '15M';
-  if (minutes <= 150) return '1H';
-  if (minutes <= 600) return '4H';
+  if (windowMinutes <= 3) return '1M';
+  if (windowMinutes <= 10) return '5M';
+  if (windowMinutes <= 40) return '15M';
+  if (windowMinutes <= 150) return '1H';
+  if (windowMinutes <= 600) return '4H';
   return '1D';
 }
 

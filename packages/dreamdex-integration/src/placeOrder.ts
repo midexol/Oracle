@@ -1,5 +1,6 @@
 import type { SomniaMarkets, UnifiedOrder } from "@somnia-chain/markets-sdk";
 import { loadConfig } from "./config.js";
+import type { UpOutcome } from "./markets.js";
 
 export type PredictionSide = "UP" | "DOWN";
 
@@ -11,6 +12,13 @@ export interface BackPredictionArgs {
   usdStake: number;
   /** Max acceptable slippage past the best opposite price, as a fraction (0.02 = 2%). */
   slippage?: number;
+  /**
+   * Which outcome token means "up" for THIS market (from the contract's
+   * question — see EventContract.upOutcome). Defaults to YES, which is right
+   * for "will X close above Y?" phrasing and wrong for its inverse, so pass
+   * the contract's own value rather than relying on the default.
+   */
+  upOutcome?: UpOutcome;
   /** Defaults to the DRY_RUN env var (see config.ts) — logs the order instead of sending it. */
   dryRun?: boolean;
 }
@@ -26,8 +34,9 @@ export async function backPrediction(
   exchange: SomniaMarkets,
   args: BackPredictionArgs,
 ): Promise<UnifiedOrder | { dryRun: true; tradable: string; side: "buy"; quantity: number; referencePrice: number }> {
-  const { symbol, side, usdStake, slippage = 0.02, dryRun = loadConfig().dryRun } = args;
-  const outcome = side === "UP" ? "YES" : "NO";
+  const { symbol, side, usdStake, slippage = 0.02, upOutcome = "YES", dryRun = loadConfig().dryRun } = args;
+  const downOutcome = upOutcome === "YES" ? "NO" : "YES";
+  const outcome = side === "UP" ? upOutcome : downOutcome;
   const tradable = `${symbol}#${outcome}`;
 
   const ticker = await exchange.fetchTicker(tradable);

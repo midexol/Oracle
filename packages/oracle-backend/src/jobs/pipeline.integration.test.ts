@@ -327,6 +327,84 @@ describe('trade idempotency', () => {
   });
 });
 
+describe('realised PnL', () => {
+  /**
+   * The losing branch of the PnL formula. The winning branch is covered by
+   * the full-loop test; this one was previously unexercised, which matters
+   * because the two branches are separate SQL expressions.
+   */
+  it('books a full loss on a position that settled the wrong way', async () => {
+    const user = await seedUser('wrongway');
+    const { local, remote } = await seedMarketFromClient();
+
+    const trade = await placeTrade({
+      userId: user.id,
+      walletAddress: WALLET,
+      marketId: local.id,
+      side: 'UP',
+      amountUsd: '10',
+    });
+    await waitForFill(trade.dreamdexOrderId!);
+
+    await resolveMarket({ dreamdexMarketId: remote.marketId, outcome: 'DOWN' });
+
+    const [row] = await db.select().from(trades).where(eq(trades.id, trade.id));
+    const expected = -(Number(row!.filledQuantity) * row!.priceCents) / 100;
+    expect(Number(row!.realizedPnl)).toBeCloseTo(expected, 6);
+    expect(Number(row!.realizedPnl)).toBeLessThan(0);
+  });
+
+  /**
+   * settleTradesForMarket and backfillMissingPnl implement the same formula
+   * in two places. If they ever drift, a repaired trade silently disagrees
+   * with a normally-settled one - so pin them together.
+   */
+  it('settlement and backfill compute identical PnL', async () => {
+    const user = await seedUser('twice');
+    const { local, remote } = await seedMarketFromClient();
+
+    const trade = await placeTrade({
+      userId: user.id,
+      walletAddress: WALLET,
+      marketId: local.id,
+      side: 'UP',
+      amountUsd: '10',
+    });
+    await waitForFill(trade.dreamdexOrderId!);
+    await resolveMarket({ dreamdexMarketId: remote.marketId, outcome: 'UP' });
+
+    const [settled] = await db.select().from(trades).where(eq(trades.id, trade.id));
+    const fromSettlement = Number(settled!.realizedPnl);
+
+    await db.update(trades).set({ realizedPnl: null }).where(eq(trades.id, trade.id));
+    await backfillMissingPnl();
+
+    const [repaired] = await db.select().from(trades).where(eq(trades.id, trade.id));
+    expect(Number(repaired!.realizedPnl)).toBeCloseTo(fromSettlement, 9);
+  });
+
+  /** A cancelled contract returns the stake: zero, not NULL, not a loss. */
+  it('books zero on a voided market rather than leaving PnL unknown', async () => {
+    const user = await seedUser('refunded');
+    const { local, remote } = await seedMarketFromClient();
+
+    const trade = await placeTrade({
+      userId: user.id,
+      walletAddress: WALLET,
+      marketId: local.id,
+      side: 'UP',
+      amountUsd: '10',
+    });
+    await waitForFill(trade.dreamdexOrderId!);
+
+    await voidMarket(remote.marketId);
+
+    const [row] = await db.select().from(trades).where(eq(trades.id, trade.id));
+    expect(row!.realizedPnl).not.toBeNull();
+    expect(Number(row!.realizedPnl)).toBe(0);
+  });
+});
+
 describe('reconciler', () => {
   it('adopts a fill whose on-chain event was never delivered', async () => {
     const user = await seedUser('unlucky');
