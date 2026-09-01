@@ -20,6 +20,7 @@ import {
   Target,
 } from "lucide-react";
 import TradingViewChart, { marketToSymbol, marketToInterval } from "./TradingViewChart";
+import { getLeaderboard, getUserProfile, createPrediction } from "../services/api.js";
 
 /* ================================================================== *
  *  ORACLE - product dashboard (premium redesign)
@@ -97,32 +98,35 @@ const GlobalStyles = () => (
     .glow-btn-down { animation: btnGlowDown 3.5s ease-in-out infinite; }
     .glow-btn-gold { animation: btnGlowGold 3.5s ease-in-out infinite; }
 
-    /* Wallet connect — subtle red/green line glow hugging the button border */
-    @keyframes walletGlowSpin { to { transform: rotate(360deg); } }
-    .wallet-glow-wrap { position: relative; z-index: 0; }
+    /* Wallet connect — red/green flowing border like chat thinking indicator */
+    @keyframes borderFlow { 
+      0% { background-position: 0% 0%; }
+      100% { background-position: 100% 0%; }
+    }
+    .wallet-glow-wrap { 
+      position: relative; 
+      z-index: 0;
+      display: inline-block;
+    }
     .wallet-glow-wrap::before {
       content: "";
       position: absolute;
-      inset: -1.5px;
+      inset: -2px;
       border-radius: inherit;
-      padding: 1.25px;
-      background: conic-gradient(from 0deg,
-        rgba(32,229,138,0)    0deg,
-        rgba(32,229,138,0.9)  40deg,
-        rgba(32,229,138,0)   100deg,
-        rgba(255,82,99,0)    170deg,
-        rgba(255,82,99,0.9)  220deg,
-        rgba(255,82,99,0)    280deg,
-        rgba(32,229,138,0)   360deg);
-      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      padding: 2px;
+      background: linear-gradient(90deg, #20E58A, #FF5263, #20E58A, #FF5263, #20E58A);
+      background-size: 200% 100%;
+      animation: borderFlow 2s linear infinite;
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
       -webkit-mask-composite: xor;
       mask-composite: exclude;
-      filter: blur(0.6px);
-      animation: walletGlowSpin 5s linear infinite;
       pointer-events: none;
       z-index: -1;
     }
-    .wallet-glow-wrap > .btn { position: relative; z-index: 1; }
+    .wallet-glow-wrap > .btn { 
+      position: relative; 
+      z-index: 1;
+    }
 
     /* Background parallax — kept well within the oversized image so the
        drift never pans past its edge and exposes bare space at a viewport
@@ -1272,7 +1276,7 @@ function OrderBook({ book, status }) {
     );
   }
 
-  if (!book) {
+  if (!book || (book.asks.length === 0 && book.bids.length === 0)) {
     return (
       <Panel pad={14}>
         <SectionLabel right={<span className="font-body tnum" style={{ fontSize: 10.5, color: C.faint }}>SIZE</span>}>Order Book</SectionLabel>
@@ -1281,10 +1285,11 @@ function OrderBook({ book, status }) {
     );
   }
 
-  const asks = [...book.asks].sort((a, b) => b[0] - a[0]);
-  const bids = [...book.bids].sort((a, b) => b[0] - a[0]);
-  const maxSize = Math.max(...asks.map((a) => a[1]), ...bids.map((b) => b[1]), 1);
-  const spread = asks.length && bids.length ? asks[asks.length - 1][0] - bids[0][0] : 0;
+  const asks = book.asks && book.asks.length > 0 ? [...book.asks].sort((a, b) => b[0] - a[0]) : [];
+  const bids = book.bids && book.bids.length > 0 ? [...book.bids].sort((a, b) => b[0] - a[0]) : [];
+  const allSizes = [...asks.map((a) => a[1] || 0), ...bids.map((b) => b[1] || 0)];
+  const maxSize = allSizes.length > 0 ? Math.max(...allSizes, 1) : 1;
+  const spread = asks.length > 0 && bids.length > 0 ? Math.max(0, asks[asks.length - 1][0] - bids[0][0]) : 0;
 
   return (
     <Panel pad={14}>
@@ -1308,7 +1313,7 @@ function RecentTrades({ trades, status }) {
     );
   }
 
-  if (!trades) {
+  if (!trades || trades.length === 0) {
     return (
       <Panel pad={14}>
         <SectionLabel>Recent Trades</SectionLabel>
@@ -1318,15 +1323,21 @@ function RecentTrades({ trades, status }) {
   }
 
   const now = Date.now();
+  const validTrades = trades.filter((t) => t && t.ts && t.price && t.size !== undefined);
+  
   return (
     <Panel pad={14}>
       <SectionLabel>Recent Trades</SectionLabel>
-      {trades.map((t, i) => (
-        <div key={t.ts + "-" + i} className="flex justify-between font-body tnum row-in" style={{ fontSize: 12, padding: "5px 2px", animationDelay: `${i * 60}ms` }}>
-          <span style={{ color: t.side === "UP" ? C.up : C.down, fontWeight: 600 }}>{t.side} ${t.price.toFixed(2)}</span>
-          <span style={{ color: C.faint }}>{t.size.toFixed(4)} · {formatTimeAgo(now - t.ts)}</span>
-        </div>
-      ))}
+      {validTrades.length > 0 ? (
+        validTrades.map((t, i) => (
+          <div key={t.ts + "-" + i} className="flex justify-between font-body tnum row-in" style={{ fontSize: 12, padding: "5px 2px", animationDelay: `${i * 60}ms` }}>
+            <span style={{ color: t.side === "UP" ? C.up : C.down, fontWeight: 600 }}>{t.side} ${Number(t.price).toFixed(2)}</span>
+            <span style={{ color: C.faint }}>{Number(t.size).toFixed(4)} · {formatTimeAgo(now - t.ts)}</span>
+          </div>
+        ))
+      ) : (
+        <div className="font-body" style={{ fontSize: 12, color: C.faint, padding: "12px 4px", textAlign: "center" }}>Waiting for trades...</div>
+      )}
     </Panel>
   );
 }
@@ -1674,15 +1685,38 @@ function ProfileView({ onOpenReceipt }) {
 
 /* ──────────────────── Leaderboard (image 7 style) ──────────────────── */
 
-function LeaderboardView() {
+function LeaderboardView({ leaderboardData, leaderboardLoading }) {
   const [tab, setTab] = useState("ALL");
   const filterTabs = ["ALL", "BTC", "ETH", "15M", "1H"];
-  const top3 = leaderboard.slice(0, 3);
-  const rest = leaderboard.slice(3);
+  
+  // Use fetched data or fallback to empty array
+  const displayData = leaderboardData || [];
+  const top3 = displayData.slice(0, 3);
+  const rest = displayData.slice(3);
+  
   // reorder for podium: 2nd, 1st, 3rd
-  const podiumOrder = [top3[1], top3[0], top3[2]];
+  const podiumOrder = [top3[1], top3[0], top3[2]].filter(Boolean);
   const podiumHeights = { 1: 110, 2: 80, 3: 68 };
   const medalColors = { 1: "#F4F6F8", 2: "#A8B0BC", 3: "#737B88" };
+
+  // Helper to get initials from username or wallet
+  const getInitials = (entry) => {
+    if (entry.username) return entry.username.slice(0, 2).toUpperCase();
+    return entry.wallet.slice(2, 4).toUpperCase();
+  };
+
+  if (leaderboardLoading && !leaderboardData) {
+    return (
+      <div className="container page" style={{ maxWidth: 580 }}>
+        <div className="text-center" style={{ marginBottom: 8 }}>
+          <h1 className="font-display" style={{ fontSize: 32, color: C.text, fontWeight: 700, fontStyle: "italic", letterSpacing: "-0.02em" }}>
+            Top Predictors
+          </h1>
+        </div>
+        <div className="skeleton" style={{ height: 300, borderRadius: 12 }} />
+      </div>
+    );
+  }
 
   return (
     <div className="container page" style={{ maxWidth: 580 }}>
@@ -1712,52 +1746,58 @@ function LeaderboardView() {
       </div>
 
       {/* Podium */}
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 16, marginBottom: 40 }}>
-        {podiumOrder.map((r) => (
-          <div key={r.rank} className="flex flex-col items-center" style={{ width: 120 }}>
-            <div className="font-display tnum" style={{ fontSize: 12, color: medalColors[r.rank], fontWeight: 700, marginBottom: 6 }}>
-              #{r.rank}
+      {podiumOrder.length > 0 && (
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 16, marginBottom: 40 }}>
+          {podiumOrder.map((r) => (
+            <div key={r.rank} className="flex flex-col items-center" style={{ width: 120 }}>
+              <div className="font-display tnum" style={{ fontSize: 12, color: medalColors[r.rank], fontWeight: 700, marginBottom: 6 }}>
+                #{r.rank}
+              </div>
+              <Avatar initials={getInitials(r)} size={r.rank === 1 ? 54 : 44} />
+              <div className="font-display" style={{ fontSize: r.rank === 1 ? 14 : 13, color: C.text, fontWeight: 700, margin: "8px 0 2px", textAlign: "center" }}>{r.username || shortAddress(r.wallet)}</div>
+              <div className="font-body tnum" style={{ fontSize: 11, color: C.muted, marginBottom: 10, textAlign: "center" }}>{r.winRate.toFixed(0)}% · {r.predictionsCount} preds</div>
+              <div
+                className="podium-bar"
+                style={{
+                  width: "100%",
+                  height: podiumHeights[r.rank],
+                  background: r.rank === 1
+                    ? `linear-gradient(to bottom, rgba(231,184,75,0.18), rgba(18,22,30,0.8))`
+                    : `linear-gradient(to bottom, rgba(255,255,255,0.06), rgba(13,16,22,0.8))`,
+                  border: `1px solid ${r.rank === 1 ? "rgba(231,184,75,0.25)" : "rgba(255,255,255,0.06)"}`,
+                  borderBottom: "none",
+                  boxShadow: r.rank === 1 ? "0 0 20px rgba(231,184,75,0.1)" : "none",
+                }}
+              >
+                <span className="font-display tnum" style={{ fontSize: 20, fontWeight: 700, color: medalColors[r.rank] }}>{r.rank}</span>
+              </div>
             </div>
-            <Avatar initials={r.initials} size={r.rank === 1 ? 54 : 44} />
-            <div className="font-display" style={{ fontSize: r.rank === 1 ? 14 : 13, color: C.text, fontWeight: 700, margin: "8px 0 2px", textAlign: "center" }}>{r.name}</div>
-            <div className="font-body tnum" style={{ fontSize: 11, color: C.muted, marginBottom: 10, textAlign: "center" }}>{r.acc}% · {r.count} preds</div>
-            <div
-              className="podium-bar"
-              style={{
-                width: "100%",
-                height: podiumHeights[r.rank],
-                background: r.rank === 1
-                  ? `linear-gradient(to bottom, rgba(231,184,75,0.18), rgba(18,22,30,0.8))`
-                  : `linear-gradient(to bottom, rgba(255,255,255,0.06), rgba(13,16,22,0.8))`,
-                border: `1px solid ${r.rank === 1 ? "rgba(231,184,75,0.25)" : "rgba(255,255,255,0.06)"}`,
-                borderBottom: "none",
-                boxShadow: r.rank === 1 ? "0 0 20px rgba(231,184,75,0.1)" : "none",
-              }}
-            >
-              <span className="font-display tnum" style={{ fontSize: 20, fontWeight: 700, color: medalColors[r.rank] }}>{r.rank}</span>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Rest of leaderboard */}
       <Panel pad={0}>
-        {rest.map((r, i) => (
-          <div
-            key={r.rank}
-            className="flex items-center justify-between hover-row"
-            style={{ padding: "16px 20px", borderTop: i === 0 ? "none" : `1px solid rgba(255,255,255,0.05)` }}
-          >
-            <div className="flex items-center gap-3.5">
-              <Avatar initials={r.initials} size={36} />
-              <span className="font-body" style={{ fontSize: 14.5, color: C.text, fontWeight: 600 }}>{r.name}</span>
+        {rest.length > 0 ? (
+          rest.map((r, i) => (
+            <div
+              key={r.wallet}
+              className="flex items-center justify-between hover-row"
+              style={{ padding: "16px 20px", borderTop: i === 0 ? "none" : `1px solid rgba(255,255,255,0.05)` }}
+            >
+              <div className="flex items-center gap-3.5">
+                <Avatar initials={getInitials(r)} size={36} />
+                <span className="font-body" style={{ fontSize: 14.5, color: C.text, fontWeight: 600 }}>{r.username || shortAddress(r.wallet)}</span>
+              </div>
+              <div className="text-right">
+                <div className="font-display tnum" style={{ fontSize: 15, color: C.text, fontWeight: 700 }}>{r.winRate.toFixed(0)}%</div>
+                <div className="font-body tnum" style={{ fontSize: 10.5, color: C.muted }}>{r.predictionsCount} predictions</div>
+              </div>
             </div>
-            <div className="text-right">
-              <div className="font-display tnum" style={{ fontSize: 15, color: C.text, fontWeight: 700 }}>{r.acc}%</div>
-              <div className="font-body tnum" style={{ fontSize: 10.5, color: C.muted }}>{r.count} predictions</div>
-            </div>
-          </div>
-        ))}
+          ))
+        ) : (
+          <div className="font-body" style={{ fontSize: 12, color: C.faint, padding: "20px", textAlign: "center" }}>No leaderboard data available</div>
+        )}
       </Panel>
     </div>
   );
@@ -2134,6 +2174,56 @@ export default function OracleDashboard({ onExit }) {
     return () => { cancelled = true; clearInterval(interval); };
   }, [walletAddress]);
 
+  // Fetch leaderboard data from API
+  const [leaderboardData, setLeaderboardData] = useState(null);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [userProfileData, setUserProfileData] = useState(null);
+  const [userProfileLoading, setUserProfileLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      setLeaderboardLoading(true);
+      try {
+        const data = await getLeaderboard({ limit: 10 });
+        setLeaderboardData(data);
+      } catch (error) {
+        console.error("Failed to fetch leaderboard:", error);
+        setLeaderboardData(null);
+      } finally {
+        setLeaderboardLoading(false);
+      }
+    };
+
+    fetchLeaderboard();
+    const interval = setInterval(fetchLeaderboard, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch user profile when wallet is connected
+  useEffect(() => {
+    if (!walletAddress) {
+      setUserProfileData(null);
+      return;
+    }
+
+    const fetchUserProfile = async () => {
+      setUserProfileLoading(true);
+      try {
+        const data = await getUserProfile(walletAddress);
+        setUserProfileData(data);
+      } catch (error) {
+        console.error("Failed to fetch user profile:", error);
+        setUserProfileData(null);
+      } finally {
+        setUserProfileLoading(false);
+      }
+    };
+
+    fetchUserProfile();
+    const interval = setInterval(fetchUserProfile, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, [walletAddress]);
+
   const connectWallet = () => setWalletModalOpen(true);
 
   const handleWalletConnect = async (type) => {
@@ -2181,9 +2271,26 @@ export default function OracleDashboard({ onExit }) {
   const openProfile = () => setView("profile");
   const openOrder = (o) => { setOrder(o); setOrderStatus("confirm"); };
 
-  const confirmOrder = () => {
+  const confirmOrder = async () => {
     setOrderStatus("pending");
-    setTimeout(() => setOrderStatus(Math.random() < 0.12 ? "error" : "done"), 1100);
+    try {
+      // Only send to API if wallet is connected
+      if (walletAddress && order) {
+        await createPrediction({
+          wallet: walletAddress,
+          marketId: order.market || `${order.asset}-${order.dir}`,
+          asset: order.asset || "BTC",
+          duration: order.duration || "15M",
+          prediction: order.dir || "UP",
+          entryPrice: order.price ? order.price / 100 : 0.5, // Normalize to 0-1 range
+          username: wallet ? wallet : undefined,
+        });
+      }
+      setTimeout(() => setOrderStatus("done"), 1100);
+    } catch (error) {
+      console.error("Failed to record prediction:", error);
+      setOrderStatus("error");
+    }
   };
   const retryOrder = () => confirmOrder();
 
@@ -2293,7 +2400,7 @@ export default function OracleDashboard({ onExit }) {
         {view === "predict" && <PredictView marketOptions={marketOptions} onSubmit={openOrder} wallet={wallet} connectWallet={connectWallet} />}
         {view === "detail" && detail && <PredictionDetailView p={detail} onOpenMarket={openMarket} onOpenProfile={openProfile} onBack={openOrder} />}
         {view === "profile" && <ProfileView onOpenReceipt={setReceipt} />}
-        {view === "leaderboard" && <LeaderboardView />}
+        {view === "leaderboard" && <LeaderboardView leaderboardData={leaderboardData} leaderboardLoading={leaderboardLoading} />}
         {view === "battle" && <BattleView onBack={openOrder} />}
       </div>
 
