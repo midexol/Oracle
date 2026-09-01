@@ -20,7 +20,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "tsx scripts/test-integration.ts",
-    "test:all": "npm run test && npm run test:integration"
+    "test:all": "npm run test && npm run test:integration",
+    "db:migrate:prod": "node dist/db/migrate.js"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

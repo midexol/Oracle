@@ -7,7 +7,7 @@ import {
   settlePredictionsForMarket,
   voidPredictionsForMarket,
 } from '../modules/predictions/service.js';
-import { settleTradesForMarket } from '../modules/trades/service.js';
+import { settleTradesForMarket, voidTradesForMarket } from '../modules/trades/service.js';
 import { recomputeStatsForMarket } from '../analytics/reputation.js';
 import { hub } from '../realtime/hub.js';
 
@@ -101,6 +101,8 @@ export async function voidMarket(dreamdexMarketId: string): Promise<void> {
   if (!market) return;
 
   await voidPredictionsForMarket(market.id);
+  // Positions on a voided contract redeem at par: PnL is zero, not unknown.
+  await voidTradesForMarket(market.id);
   await recomputeStatsForMarket(market.id);
 }
 

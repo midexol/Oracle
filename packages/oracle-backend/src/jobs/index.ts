@@ -38,13 +38,24 @@ export async function startJobs(log: FastifyBaseLogger): Promise<JobHandles> {
   await client.start();
   log.info({ mode: client.mode }, 'DreamDEX client started');
 
-  const unsubscribeBridge = startDreamDexBridge(log);
-
-  // Prime the database with whatever is already listed, so the feed is not
-  // empty for the first tick after a cold start.
-  await syncMarkets(log);
+  // The client itself always starts - the API reads order books and market
+  // detail through it. What ENABLE_JOBS gates is everything that WRITES.
+  let unsubscribeBridge: () => void = () => undefined;
 
   if (env.ENABLE_JOBS) {
+    // The bridge turns exchange events into database writes (quotes, fills,
+    // settlements), so it belongs behind the same flag as the sweeps.
+    // Outside it, ENABLE_JOBS=false left the bridge streaming writes into a
+    // database it was supposed to be leaving alone.
+    unsubscribeBridge = startDreamDexBridge(log);
+
+    // Prime the database with whatever is already listed, so the feed is not
+    // empty for the first tick after a cold start. Inside the flag: with jobs
+    // off this used to run one sync anyway, which meant ENABLE_JOBS=false did
+    // not actually mean "no background writes" - the one guarantee it exists
+    // to give a test run or a read-only replica.
+    await syncMarkets(log);
+
     timers.push(interval(() => syncMarkets(log), env.MARKET_SYNC_INTERVAL_MS));
     timers.push(
       interval(async () => {
@@ -71,7 +82,9 @@ export async function startJobs(log: FastifyBaseLogger): Promise<JobHandles> {
     );
   } else {
     log.warn(
-      'ENABLE_JOBS=false - market sync, settlement sweep and order reconciliation are disabled',
+      'ENABLE_JOBS=false - this instance performs no background database writes: ' +
+        'no market sync, no event bridge, no settlement sweep, no order reconciliation. ' +
+        'The API still serves reads.',
     );
   }
 

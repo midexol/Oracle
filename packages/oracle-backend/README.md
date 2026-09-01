@@ -67,23 +67,47 @@ and nothing else in the codebase imports the SDK. Two implementations sit behind
 - **`mock`** ([src/dreamdex/mock/](src/dreamdex/mock/)) — a real simulator, not a stub. Rolling
   Event Contract series, binary option pricing that converges to 1¢/99¢ at expiry, an order book,
   asynchronous fills that arrive as simulated on-chain `OrderFilled` events, and settlement.
-- **`live`** ([src/dreamdex/live/client.ts](src/dreamdex/live/client.ts)) — deliberately
-  unimplemented, with each method documenting exactly what the Bot Kit needs to provide.
+- **`live`** ([src/dreamdex/live/client.ts](src/dreamdex/live/client.ts)) — an adapter over
+  [`@signal/dreamdex-integration`](../dreamdex-integration), which is the only package permitted
+  to import `@somnia-chain/markets-sdk`.
 
 `MOCK_TIME_SCALE=20` compresses the clock, so a "15M" contract settles in ~45 seconds and you can
 watch the entire loop — predict, back, settle, reputation move, leaderboard reorder — inside one
 sitting.
 
-### What still needs the real kit
+### Three shape differences the adapter absorbs
 
-1. REST + WebSocket market data endpoints
-2. The current `placeOrder` entry point (**not** `placeTakerOrderWithoutVault` — removed in the
-   June 2026 upgrade)
-3. The on-chain `OrderFilled` event on Somnia Shannon (chain `50312`) — authoritative for
-   fill/PnL/inventory over the REST trade feed
-4. **The Event Contract settlement/finalisation interface.** This is the open question flagged in
-   the PRD. The whole downstream pipeline already runs off a single `onMarketSettled` event, so
-   this is the only piece that changes once the interface is known.
+The SDK and Oracle disagree about three things, and all three are reconciled in
+`live/client.ts` so nothing downstream has to know:
+
+1. **Prices.** The SDK quotes probabilities as fractions (`0.43`); Oracle stores integer cents
+   (`43`).
+2. **Identity.** A market has *two* identifiers: the trading symbol
+   (`BTC-95000-31DEC26/USDC`, used for orders and books) and an on-chain `bytes32` marketId
+   (used for settlement reads). They are not interchangeable — passing the symbol to a
+   settlement read silently fails.
+3. **Orientation.** Whether the YES token means "up" depends on the market's own question.
+   `"Will BTC close above $95,000?"` → YES is UP; `"…below…"` → YES is DOWN. This is resolved
+   per market from the question text ([`resolveUpOutcome`](../dreamdex-integration/src/markets.ts)),
+   not assumed. A market whose phrasing cannot be parsed is logged loudly rather than guessed at,
+   because getting it backwards inverts every settled prediction with no error anywhere.
+
+### Known gaps in live mode
+
+- **`getOrderByClientOrderId` is not implementable.** The SDK accepts no client order id, so
+  there is nothing exchange-side carrying ours. This is exactly why idempotency is enforced by
+  the unique `trades.idempotency_key` in our own database instead of being delegated to the
+  exchange. The reconciler treats the resulting error as transient and leaves such a trade
+  `PENDING` — the safe direction to fail.
+- **`getRecentTrades` returns empty.** The SDK exposes the signer's *own* fills, not a public
+  tape. The market page degrades rather than erroring.
+- **Duration buckets are approximate.** Real contracts are strike-and-expiry
+  (`BTC-95000-31DEC26`); the PRD assumes rolling tenors (`BTC 15M`). Duration is derived from the
+  contract's own window (`tradingStart → expiry`), which is stable for its lifetime — but if the
+  live venue lists only long-dated contracts, "BTC 15M accuracy" needs a product decision rather
+  than this approximation.
+- **Live mode has never been run against the real testnet.** Everything here is verified against
+  the simulator and the SDK's published types.
 
 ---
 
@@ -183,6 +207,16 @@ Pass exactly one of `amountUsd` or `quantity`. Backing does not let the caller c
 comes from the prediction. Returns `201` with the order typically `PENDING`; the fill arrives
 asynchronously and is pushed over the WebSocket.
 
+**Send an `Idempotency-Key` header.** It is optional, and omitting it means a retried request —
+a double-tap, a flaky connection, an automatic client retry — places a *second real, funded
+order*. With a key, the replay returns the original trade. Keys are scoped per user, and
+uniqueness is enforced by the database, so two concurrent requests carrying the same key cannot
+both reach the exchange. DreamDEX itself offers no client-order-id dedup, so this is the only
+protection there is.
+
+Rate limits: `POST /trades` 30/min, `POST /predictions` 60/min, `POST /auth/challenge` 20/min;
+everything else 300/min.
+
 ### Profiles & social
 
 | Method | Path | Auth | Purpose |
@@ -199,9 +233,24 @@ asynchronously and is pushed over the WebSocket.
 | --- | --- | --- | --- |
 | `GET` | `/leaderboard` | — | **Page 6.** `?asset&duration&sort=score\|accuracy\|edge\|volume\|streak&minPredictions&limit&offset` |
 | `GET` | `/leaderboard/me` | ✔ | Your rank on any board |
+| `GET` | `/leaderboard/me/progress` | ✔ | "You are N correct calls from the top 10" — `?topN` |
 | `GET` | `/leaderboard/influence` | — | Ranked by originated DreamDEX volume |
 
 The PRD's tabs — ALL / BTC / ETH / 15M / 1H — are just `asset` + `duration` combinations.
+
+### Battles
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/battles` | — | **Page 5.** `?status=LIVE\|SETTLED\|VOID&marketId&limit` |
+| `GET` | `/battles/candidates` | — | Opposing calls that could be paired, best-matched first |
+| `GET` | `/battles/:id` | — | One head-to-head, with backing volume per side |
+| `POST` | `/battles` | ✔ | `{ predictionAId, predictionBId }` — order does not matter |
+
+A battle is two opposing calls on one contract. Backing a side is an ordinary
+`POST /trades { backedPredictionId }`, so battles inherit attribution, fills and settlement with
+no separate execution path. Side A is normalised to the UP call at creation, which is what lets
+the resolver pick a winner from the market outcome alone.
 
 ### Realtime — `ws://localhost:4000/ws`
 
@@ -282,8 +331,30 @@ Oracle has no record of, which is not.
 | `npm run db:migrate` | Apply migrations |
 | `npm run db:studio` | Drizzle Studio |
 | `npm run db:seed` | Demo predictors with genuinely-computed history |
-| `npm test` | Vitest — the scoring engine |
-| `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Unit tests (64) |
+| `npm run test:integration` | Integration tests (33) against a real Postgres — boots a throwaway one if `TEST_DATABASE_URL` is unset, so it needs no Docker |
+| `npm run typecheck` | `tsc --noEmit`, including scripts and configs |
+| `npm run build` | Compile to `dist/` |
+| `npm run db:migrate:prod` | Apply migrations from the compiled output (containers have no `tsx`) |
+
+### Docker
+
+Build from the **repo root** — the backend depends on a sibling workspace:
+
+```bash
+docker build -f packages/oracle-backend/Dockerfile -t oracle-backend .
+```
+
+Or bring up Postgres and the API together:
+
+```bash
+docker compose up --build
+docker compose run --rm backend npm run db:migrate:prod
+docker compose run --rm backend npm run db:seed
+```
+
+Migrations are a deliberate separate step rather than part of boot, so two replicas starting
+at once cannot race each other through the same migration.
 
 ### About the seed
 
@@ -303,7 +374,12 @@ See [.env.example](.env.example). Beyond the two required values:
 | --- | --- | --- |
 | `DREAMDEX_MODE` | `mock` | `mock` \| `live` |
 | `MOCK_TIME_SCALE` | `20` | Simulator clock compression; `1` = real time |
-| `SOMNIA_CHAIN_ID` | `50312` | Shannon testnet |
-| `ENABLE_JOBS` | `true` | Disable to run the API without background workers |
+| `ENABLE_JOBS` | `true` | Master switch for background **database writes**: market sync, the event bridge, the settlement sweep and order reconciliation. `false` gives a read-only API replica — exactly one instance should run with it `true` |
 | `MARKET_SYNC_INTERVAL_MS` | `5000` | Reconciliation against DreamDEX |
 | `RESOLVER_INTERVAL_MS` | `10000` | Settlement safety-net sweep |
+| `RECONCILER_INTERVAL_MS` | `20000` | Chases orders whose fill event never arrived |
+
+Connection settings for `DREAMDEX_MODE=live` — network, indexer URL, addresses, and `DRY_RUN` —
+belong to [`@signal/dreamdex-integration`](../dreamdex-integration) and are deliberately *not*
+duplicated here. `DRY_RUN` defaults to **true**: orders are logged, not sent, until you set it
+to `false`.
