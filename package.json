@@ -3,5 +3,13 @@
   "private": true,
   "workspaces": [
     "packages/*"
-  ]
+  ],
+  "scripts": {
+    "dev:analytics": "npm run dev --workspace=@signal/oracle-analytics",
+    "dev:dreamdex": "npm run typecheck --workspace=@signal/dreamdex-integration",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "seed": "npm run seed --workspace=@signal/oracle-analytics",
+    "prisma:generate": "npm run prisma:generate --workspace=@signal/oracle-analytics"
+  }
 }
