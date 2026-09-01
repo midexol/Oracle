@@ -5,3 +5,7 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# Local test databases
+*.db-journal
+.vitest/

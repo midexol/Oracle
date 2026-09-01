@@ -2,7 +2,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { getDreamDexClient } from '../dreamdex/index.js';
 import { recordPriceSnapshot, updateQuote, upsertMarket } from '../modules/markets/service.js';
 import { applyOrderFilled } from '../modules/trades/service.js';
-import { resolveMarket } from './resolver.js';
+import { resolveMarket, voidMarket } from './resolver.js';
 import { hub } from '../realtime/hub.js';
 
 /**
@@ -127,6 +127,25 @@ export function startDreamDexBridge(log: FastifyBaseLogger): () => void {
         }
       })();
     },
+
+    /**
+     * A cancelled contract must leave every record untouched - the call was
+     * never given a chance to be right or wrong. Without this the market
+     * would sit OPEN until the settlement sweep noticed, holding predictions
+     * PENDING in the meantime.
+     */
+    onMarketVoided: (marketId) => {
+      void (async () => {
+        try {
+          await voidMarket(marketId);
+          log.info({ marketId }, 'Market voided - calls on it were cancelled, not lost');
+        } catch (err) {
+          log.error({ err, marketId }, 'Failed to void market');
+        }
+      })();
+    },
+
+    onError: (err) => log.error({ err }, 'DreamDEX transport error'),
   });
 
   return unsubscribe;

@@ -19,14 +19,10 @@ export function getDreamDexClient(): DreamDexClient {
 
   client =
     env.DREAMDEX_MODE === 'live'
-      ? new LiveDreamDexClient({
-          restUrl: env.DREAMDEX_REST_URL,
-          wsUrl: env.DREAMDEX_WS_URL,
-          apiKey: env.DREAMDEX_API_KEY,
-          rpcUrl: env.SOMNIA_RPC_URL,
-          chainId: env.SOMNIA_CHAIN_ID,
-          exchangeAddress: env.DREAMDEX_EXCHANGE_ADDRESS,
-        })
+      ? // Network, indexer URL, addresses and DRY_RUN come from
+        // @signal/dreamdex-integration's own config, so there is exactly one
+        // place that decides which chain we are pointed at.
+        new LiveDreamDexClient({ discoverIntervalMs: env.MARKET_SYNC_INTERVAL_MS })
       : new MockDreamDexClient({ timeScale: env.MOCK_TIME_SCALE });
 
   return client;
