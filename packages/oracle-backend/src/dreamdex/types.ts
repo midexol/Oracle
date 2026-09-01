@@ -122,8 +122,12 @@ export interface DreamDexEventHandlers {
   onTrade?: (e: PublicTrade) => void;
   onOrderFilled?: (e: OrderFilledEvent) => void;
   onMarketSettled?: (e: MarketSettledEvent) => void;
+  /** A contract was cancelled: nobody's record should be affected by it. */
+  onMarketVoided?: (marketId: string) => void;
   onMarketOpened?: (m: DreamDexMarket) => void;
   onStatusChange?: (connected: boolean) => void;
+  /** Transport-level failure. Reported, never thrown at the subscriber. */
+  onError?: (err: unknown) => void;
 }
 
 export interface DreamDexClient {
