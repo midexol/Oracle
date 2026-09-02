@@ -21,6 +21,20 @@ const envSchema = z.object({
   AUTH_DOMAIN: z.string().default('oracle.local'),
 
   /**
+   * Whether the /api compatibility surface accepts writes with no token,
+   * trusting the wallet in the request body.
+   *
+   * Left unset it follows NODE_ENV: allowed outside production, refused in it.
+   * That is the safe default in both directions - a demo keeps working without
+   * ceremony, and a real deployment cannot accidentally ship an endpoint where
+   * anyone can post a call as anyone else. Set it explicitly to override.
+   */
+  COMPAT_ALLOW_UNSIGNED_WRITES: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? null : v === 'true' || v === '1')),
+
+  /**
    * 'mock' runs the built-in simulator; 'live' talks to DreamDEX through
    * @signal/dreamdex-integration.
    *
@@ -56,3 +70,7 @@ export const env = parsed.data;
 export type Env = typeof env;
 export const isProd = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
+
+/** Resolved here rather than in the schema, which cannot see NODE_ENV. */
+export const allowUnsignedCompatWrites =
+  env.COMPAT_ALLOW_UNSIGNED_WRITES ?? !isProd;
