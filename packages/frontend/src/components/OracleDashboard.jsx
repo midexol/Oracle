@@ -292,6 +292,42 @@ const GlobalStyles = () => (
     .orc-root .nav-links { display: flex; align-items: center; gap: 30px; }
     .orc-root .bottom-nav { display: none; }
 
+    /* Desktop sidebar nav */
+    .orc-root .app-topbar-row { display: none; }
+    .orc-root .app-sidebar {
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0; left: 0; bottom: 0;
+      width: 220px;
+      padding: 22px 14px;
+      background: rgba(7,9,13,0.92);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border-right: 1px solid rgba(255,255,255,0.06);
+      z-index: 25;
+      gap: 4px;
+    }
+    .orc-root .app-sidebar-logo {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 10px 26px;
+      background: none; border: none; cursor: pointer;
+    }
+    .orc-root .app-sidebar-link {
+      display: flex; align-items: center; gap: 12px;
+      width: 100%; text-align: left;
+      background: none; border: none; cursor: pointer;
+      padding: 11px 14px; border-radius: 10px;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 13.5px; font-weight: 600;
+      color: ${C.muted};
+      transition: background .15s ease, color .15s ease;
+    }
+    .orc-root .app-sidebar-link:hover { background: rgba(255,255,255,0.05); color: ${C.text}; }
+    .orc-root .app-sidebar-link.active { background: rgba(32,229,138,0.1); color: ${C.up}; }
+    .orc-root .app-sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+    .orc-root .app-shell-content { padding-left: 220px; }
+
     .orc-root .market-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .orc-root .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
     .orc-root .battle-grid { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 18px; }
@@ -325,6 +361,9 @@ const GlobalStyles = () => (
       .orc-root .page { padding: 24px 0 120px 0; }
       .orc-root .nav-pill-tabs { display: none; }
       .orc-root .container { padding: 0 16px; }
+      .orc-root .app-sidebar { display: none; }
+      .orc-root .app-topbar-row { display: flex; }
+      .orc-root .app-shell-content { padding-left: 0; }
       
       /* Better spacing on tablet */
       .orc-root .glass-card { padding: 16px !important; border-radius: 12px; }
@@ -895,19 +934,94 @@ function Nav({ view, setView, wallet, walletBalance, connectWallet, onExit, tick
     ["battle", "Battles", Flame],
     ["profile", "Profile", User],
   ];
+  const sidebarItems = [
+    ["feed", "Discover", Compass],
+    ["market", "Markets", LineChart],
+    ["predict", "Predict", Target],
+    ["battle", "Battles", Flame],
+    ["leaderboard", "Rankings", Trophy],
+  ];
 
   const mainViews = ["feed", "market", "predict", "battle", "leaderboard"];
   const activeTab = view === "profile" ? "profile" : mainViews.includes(view) ? view : null;
 
   return (
-    <div style={{
-      position: "sticky", top: 0, zIndex: 20,
-      background: "rgba(5,7,10,0.9)",
-      backdropFilter: "blur(18px)",
-      WebkitBackdropFilter: "blur(18px)",
-      borderBottom: "1px solid rgba(255,255,255,0.06)",
-    }}>
-      <div className="container flex items-center justify-between" style={{ height: 62 }}>
+    <>
+      {/* Desktop sidebar */}
+      <aside className="app-sidebar" aria-label="Main navigation">
+        <button
+          onClick={() => setView("feed")}
+          className="app-sidebar-logo link-btn"
+          aria-label="Oracle home"
+        >
+          <OracleLogo size={19} color={C.text} />
+          <span className="font-display" style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-0.01em", color: C.text }}>ORACLE</span>
+        </button>
+
+        <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {sidebarItems.map(([key, label, Icon]) => (
+            <button
+              key={key}
+              onClick={() => setView(key)}
+              className={`app-sidebar-link ${activeTab === key ? "active" : ""}`}
+              aria-current={activeTab === key ? "page" : undefined}
+            >
+              <Icon size={18} strokeWidth={2} />
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="app-sidebar-footer">
+          <button
+            onClick={() => setView("profile")}
+            className={`app-sidebar-link ${view === "profile" ? "active" : ""}`}
+            aria-current={view === "profile" ? "page" : undefined}
+          >
+            <User size={18} strokeWidth={2} />
+            Profile
+          </button>
+          {wallet ? (
+            <button
+              onClick={() => setView("profile")}
+              className="font-body tnum flex items-center gap-2 link-btn"
+              style={{
+                fontSize: 12, color: C.text,
+                background: "rgba(18,22,30,0.8)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                padding: "9px 12px", borderRadius: 10, cursor: "pointer",
+              }}
+              aria-label="View your profile"
+            >
+              <span style={{ width: 6, height: 6, borderRadius: 999, background: C.up, display: "inline-block", boxShadow: `0 0 6px ${C.up}` }} />
+              {wallet}
+            </button>
+          ) : (
+            <Button variant="ghost" onClick={connectWallet} ariaLabel="Connect wallet" walletGlow full>
+              <span className="flex items-center gap-2"><Wallet size={13} /> Connect</span>
+            </Button>
+          )}
+          {onExit && (
+            <button
+              onClick={onExit}
+              className="font-body link-btn"
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: C.muted, display: "flex", alignItems: "center", gap: 5, padding: "8px 10px" }}
+              aria-label="Back to site"
+            >
+              <ArrowLeft size={14} strokeWidth={2} /> Back to site
+            </button>
+          )}
+        </div>
+      </aside>
+
+      <div style={{
+        position: "sticky", top: 0, zIndex: 20,
+        background: "rgba(5,7,10,0.9)",
+        backdropFilter: "blur(18px)",
+        WebkitBackdropFilter: "blur(18px)",
+        borderBottom: "1px solid rgba(255,255,255,0.06)",
+      }}>
+      <div className="app-topbar-row container flex items-center justify-between" style={{ height: 62 }}>
         {/* Left: logo + back */}
         <div className="flex items-center" style={{ gap: 20 }}>
           {onExit && (
@@ -991,8 +1105,11 @@ function Nav({ view, setView, wallet, walletBalance, connectWallet, onExit, tick
       </div>
 
       <TickerStrip tickerData={tickerData} />
+      </div>
 
-      {/* Mobile bottom nav */}
+      {/* Mobile bottom nav — rendered outside the backdrop-filtered header,
+          since backdrop-filter creates a containing block for fixed descendants
+          and would pin "bottom:0" to the header box instead of the viewport. */}
       <div className="bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "rgba(7,9,13,0.95)", backdropFilter: "blur(16px)", borderTop: `1px solid rgba(255,255,255,0.07)`, zIndex: 30, padding: "8px 0 10px" }}>
         <div className="flex items-center justify-around" style={{ width: "100%" }}>
       {mobileItems.map(([key, label, Icon]) => (
@@ -1009,7 +1126,7 @@ function Nav({ view, setView, wallet, walletBalance, connectWallet, onExit, tick
           ))}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -2655,7 +2772,7 @@ export default function OracleDashboard({ onExit }) {
         }} />
       </div>
 
-      <div style={{ position: "relative", zIndex: 1 }}>
+      <div className="app-shell-content" style={{ position: "relative", zIndex: 1 }}>
         <Nav
           view={view}
           setView={(v) => { setView(v); setDetail(null); }}
