@@ -3,13 +3,9 @@ dist/
 .env
 .env.local
 *.log
-<<<<<<< HEAD
 .DS_Store
 coverage/
 
 # Local test databases
 *.db-journal
 .vitest/
-=======
-packages/oracle-analytics/prisma/*.db
->>>>>>> d1510ed37dc50ca46150fa09114bbecbbbafc954
