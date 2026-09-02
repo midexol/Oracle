@@ -21,7 +21,8 @@
     "test:watch": "vitest",
     "test:integration": "tsx scripts/test-integration.ts",
     "test:all": "npm run test && npm run test:integration",
-    "db:migrate:prod": "node dist/db/migrate.js"
+    "db:migrate:prod": "node dist/db/migrate.js",
+    "smoke": "node scripts/smoke-compat.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
