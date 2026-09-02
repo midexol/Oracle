@@ -228,11 +228,21 @@ function GlobalStyles() {
         .orl-root .how-grid { grid-template-columns:repeat(2,1fr); }
         .orl-root .site-stats-grid { grid-template-columns:repeat(2,1fr); }
         .orl-root .stat-item { border-right:none; border-bottom:1px solid rgba(255,255,255,0.08); padding:22px; }
+        .orl-root .feed-grid { grid-template-columns:1fr !important; gap:20px; }
+        .orl-root .loop-grid { grid-template-columns:repeat(2,1fr) !important; gap:20px; }
+        .orl-root .loop-connector { display:none; }
+        .orl-root .battles-grid,.orl-root .leaderboard-hero-grid { grid-template-columns:1fr !important; gap:40px; }
+        .orl-root .site-container[style*="100px"],
+        .orl-root .site-container[style*="108px"],
+        .orl-root .site-container[style*="120px"] { padding-top:64px !important; padding-bottom:64px !important; }
       }
       @media (max-width:768px) { .orl-root .nav-links { display:none; } }
       @media (max-width:640px) {
         .orl-root .site-container { padding:0 20px; }
         .orl-root .how-grid { grid-template-columns:1fr; }
+        .orl-root .loop-grid { grid-template-columns:1fr !important; }
+        .orl-root .site-container[style*="px 40px"],
+        .orl-root .site-container[style*="px 24px"] { padding-left:20px !important; padding-right:20px !important; }
       }
 
       /* ── Ultra-minimal scrollbar ── */
@@ -611,7 +621,7 @@ export default function OracleLanding({ onLaunch = () => {} }) {
             sub="Every prediction you see is connected to a live DreamDEX Event Contract. The Back button isn't social media engagement. It's a real order."
           />
           {/* 3-column social feed cards */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:18 }}>
+          <div className="feed-grid" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:18 }}>
             <SocialPredCard user="Mide" initials="MD" acc={74} market="BTC 15M" contractId="OC-BTC-001" dir="UP"   price={marketData.BTC.price} assetAcc={Math.min(98, Math.max(60, 60 + Math.abs(marketData.BTC.change)))} asset="BTC" time="06:42" watched="1,284" backed="312"  onBack={onLaunch} />
             <SocialPredCard user="AlphaTrader" initials="AT" acc={78} market="ETH 1H"  contractId="OC-ETH-002" dir="DOWN" price={marketData.ETH.price} assetAcc={Math.min(98, Math.max(60, 60 + Math.abs(marketData.ETH.change)))} asset="ETH" time="41:10" watched="876"  backed="195"  onBack={onLaunch} />
             <SocialPredCard user="QuantX" initials="QX" acc={71} market="BTC 1H"  contractId="OC-BTC-003" dir="UP"   price={marketData.BTC.price} assetAcc={Math.min(98, Math.max(60, 60 + Math.abs(marketData.BTC.change) * 0.8))} asset="BTC" time="22:03" watched="640"  backed="148"  onBack={onLaunch} />
@@ -636,12 +646,12 @@ export default function OracleLanding({ onLaunch = () => {} }) {
           />
 
           {/* 4-step loop */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:16, marginBottom:48 }}>
+          <div className="loop-grid" style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:16, marginBottom:48 }}>
             {loopSteps.map((s,i) => (
               <div key={i} className="loop-step">
                 {/* Connector arrow between steps */}
                 {i < loopSteps.length-1 && (
-                  <div style={{ position:"absolute", top:"50%", right:-12, transform:"translateY(-50%)", color:C.faint, zIndex:1 }}>
+                  <div className="loop-connector" style={{ position:"absolute", top:"50%", right:-12, transform:"translateY(-50%)", color:C.faint, zIndex:1 }}>
                     <ArrowRight size={16} strokeWidth={2} />
                   </div>
                 )}
@@ -684,7 +694,7 @@ export default function OracleLanding({ onLaunch = () => {} }) {
            ═══════════════════════════════════════ */}
       <section style={{ background:"radial-gradient(ellipse 70% 45% at 50% 0%, rgba(40,70,130,0.12) 0%, rgba(7,9,13,0) 60%), linear-gradient(180deg, #0B0E15 0%, #07090D 45%, #05070A 100%)", borderBottom:"1px solid rgba(255,255,255,0.05)", padding:"100px 0" }}>
         <div className="site-container">
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:64, alignItems:"center" }}>
+          <div className="battles-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:64, alignItems:"center" }}>
             {/* Left: copy */}
             <div>
               <div className="font-body" style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:14 }}>Battles</div>
@@ -749,7 +759,7 @@ export default function OracleLanding({ onLaunch = () => {} }) {
         <img src="/spheres-bg.png" alt="" className="spheres-bg-img orl-bg-drift" aria-hidden="true" />
         <div className="spheres-overlay" />
         <div className="site-container" style={{ padding:"100px 40px", position:"relative", zIndex:2 }}>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:64, alignItems:"center" }}>
+          <div className="leaderboard-hero-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:64, alignItems:"center" }}>
             {/* Left: leaderboard */}
             <div>
               <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:32 }}>
