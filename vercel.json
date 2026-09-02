@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build --workspace=@signal/dreamdex-integration && npm run build --workspace=@signal/frontend",
+  "outputDirectory": "packages/frontend/dist",
+  "installCommand": "npm install --no-ignore-scripts",
+  "framework": "vite"
+}
