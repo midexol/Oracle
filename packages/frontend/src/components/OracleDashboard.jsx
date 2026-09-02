@@ -20,7 +20,7 @@ import {
   Target,
 } from "lucide-react";
 import TradingViewChart, { marketToSymbol, marketToInterval } from "./TradingViewChart";
-import { getLeaderboard, getUserProfile, createPrediction } from "../services/api.js";
+import { getLeaderboard, getUserProfile, createPrediction, getAuthChallenge, verifyAuthSignature, setAuthToken } from "../services/api.js";
 
 /* ================================================================== *
  *  ORACLE - product dashboard (premium redesign)
@@ -909,7 +909,7 @@ function TickerStrip({ tickerData }) {
 
 /* ──────────────────── Nav (image 8 style pill tabs) ──────────────────── */
 
-function Nav({ view, setView, wallet, walletBalance, connectWallet, onExit, tickerData }) {
+function Nav({ view, setView, wallet, walletBalance, signedIn, connectWallet, onExit, tickerData }) {
   const items = [
     ["feed", "Discover"],
     ["market", "Markets"],
@@ -983,7 +983,10 @@ function Nav({ view, setView, wallet, walletBalance, connectWallet, onExit, tick
               }}
               aria-label="View your profile"
             >
-              <span style={{ width: 6, height: 6, borderRadius: 999, background: C.up, display: "inline-block", boxShadow: `0 0 6px ${C.up}` }} />
+              <span
+                title={signedIn ? "Signed in" : "Connected, not signed in"}
+                style={{ width: 6, height: 6, borderRadius: 999, background: signedIn ? C.up : C.muted, display: "inline-block", boxShadow: signedIn ? `0 0 6px ${C.up}` : "none" }}
+              />
               {wallet}
             </button>
           ) : (
@@ -1080,7 +1083,10 @@ function Nav({ view, setView, wallet, walletBalance, connectWallet, onExit, tick
               }}
               aria-label="View your profile"
             >
-              <span style={{ width: 6, height: 6, borderRadius: 999, background: C.up, display: "inline-block", boxShadow: `0 0 6px ${C.up}` }} />
+              <span
+                title={signedIn ? "Signed in" : "Connected, not signed in"}
+                style={{ width: 6, height: 6, borderRadius: 999, background: signedIn ? C.up : C.muted, display: "inline-block", boxShadow: signedIn ? `0 0 6px ${C.up}` : "none" }}
+              />
               {wallet}
               {walletBalance != null && (
                 <span style={{ color: C.muted, fontWeight: 500 }}>· {walletBalance.toFixed(4)} ETH</span>
@@ -2522,6 +2528,7 @@ export default function OracleDashboard({ onExit }) {
   const [walletAddress, setWalletAddress] = useState(null);
   const [walletBalance, setWalletBalance] = useState(null);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
   const [order, setOrder] = useState(null);
   const [orderStatus, setOrderStatus] = useState("confirm");
   const [receipt, setReceipt] = useState(null);
@@ -2583,7 +2590,10 @@ export default function OracleDashboard({ onExit }) {
       const addr = accounts?.[0] || null;
       setWallet(addr ? shortAddress(addr) : null);
       setWalletAddress(addr);
+      setSignedIn(false);
+      setAuthToken(null);
       if (!addr) setWalletBalance(null);
+      else signInWithWallet(addr, window.ethereum);
     };
 
     provider.on?.("accountsChanged", handleAccountsChanged);
@@ -2670,6 +2680,29 @@ export default function OracleDashboard({ onExit }) {
     try { localStorage.setItem("oracle_onboarded", "1"); } catch { /* private browsing — non-fatal */ }
   };
 
+  // Proves ownership of the connected address to oracle-backend: fetch a
+  // one-time nonce, have the wallet sign it, exchange the signature for a
+  // JWT. EVM-only (personal_sign) - Phantom (Solana) is skipped since
+  // DreamDEX/Oracle only exists on the EVM side.
+  const signInWithWallet = async (address, provider) => {
+    if (!provider) return;
+    try {
+      const { nonce, message } = await getAuthChallenge(address);
+      const signature = await provider.request({
+        method: "personal_sign",
+        params: [message, address],
+      });
+      await verifyAuthSignature({ walletAddress: address, nonce, signature });
+      setSignedIn(true);
+    } catch (err) {
+      // User rejected the signature, or the backend is unreachable - stay
+      // connected but unsigned; predictions fall back to unsigned writes
+      // wherever the backend still allows that.
+      console.error("Wallet sign-in failed", err);
+      setSignedIn(false);
+    }
+  };
+
   const handleWalletConnect = async (type) => {
     try {
       if (type === "metamask") {
@@ -2681,6 +2714,7 @@ export default function OracleDashboard({ onExit }) {
         setWallet(accounts?.[0] ? shortAddress(accounts[0]) : null);
         setWalletAddress(accounts?.[0] || null);
         setWalletModalOpen(false);
+        if (accounts?.[0]) await signInWithWallet(accounts[0], window.ethereum);
       } else if (type === "phantom") {
         const phantom = window.phantom?.solana || window.solana;
         if (!phantom?.isPhantom) {
@@ -2700,6 +2734,7 @@ export default function OracleDashboard({ onExit }) {
         setWallet(accounts?.[0] ? shortAddress(accounts[0]) : null);
         setWalletAddress(accounts?.[0] || null);
         setWalletModalOpen(false);
+        if (accounts?.[0]) await signInWithWallet(accounts[0], cbProvider);
       } else if (type === "walletconnect") {
         // WalletConnect v2 deeplink - opens the QR/deeplink flow
         window.open("https://walletconnect.com/", "_blank");
@@ -2844,6 +2879,7 @@ export default function OracleDashboard({ onExit }) {
           setView={(v) => { setView(v); setDetail(null); }}
           wallet={wallet}
           walletBalance={walletBalance}
+          signedIn={signedIn}
           connectWallet={connectWallet}
           onExit={onExit}
           tickerData={tickerData}
