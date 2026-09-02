@@ -460,7 +460,7 @@ const GlobalStyles = () => (
       .glass-card {
         width: calc(100% - 24px) !important;
         max-width: calc(100% - 24px) !important;
-        margin: auto;
+        margin: 0 auto;
         padding: 20px !important;
         border-radius: 14px;
       }
@@ -2462,9 +2462,67 @@ function WalletModal({ onConnect, onClose }) {
   );
 }
 
+/* ──────────────────── Onboarding ──────────────────── */
+
+function OnboardingScreen({ wallet, connectWallet, onContinue, onSkip }) {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: C.bg }}>
+      <div className="rise-in glass-card" style={{ padding: "clamp(28px, 5vw, 44px) clamp(24px, 4vw, 36px)", width: "clamp(280px, 92vw, 420px)", maxWidth: "100%", textAlign: "center" }}>
+        <div className="flex items-center justify-center gap-2" style={{ marginBottom: 22 }}>
+          <OracleLogo size={26} color={C.text} />
+          <span className="font-display" style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.01em", color: C.text }}>ORACLE</span>
+        </div>
+
+        {!wallet ? (
+          <>
+            <div className="font-display" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.text, letterSpacing: "-0.02em", marginBottom: 10 }}>
+              Connect your wallet
+            </div>
+            <p className="font-body" style={{ fontSize: 13.5, color: C.muted, lineHeight: 1.65, marginBottom: 28 }}>
+              Oracle is non-custodial — every prediction you back is a real DreamDEX Event Contract order signed by your own wallet. Connect now, or browse first and connect later.
+            </p>
+            <Button variant="up" full glow onClick={connectWallet} ariaLabel="Connect wallet">
+              <span className="flex items-center justify-center gap-2"><Wallet size={14} /> Connect Wallet</span>
+            </Button>
+            <button
+              onClick={onSkip}
+              className="font-body link-btn"
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12.5, color: C.muted, marginTop: 18, padding: 6 }}
+            >
+              Continue without a wallet
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={{
+              width: 52, height: 52, borderRadius: "50%", margin: "0 auto 18px",
+              background: "rgba(32,229,138,0.12)", border: "1px solid rgba(32,229,138,0.3)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Check size={24} color={C.up} strokeWidth={2.5} />
+            </div>
+            <div className="font-display" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.text, letterSpacing: "-0.02em", marginBottom: 8 }}>
+              You're connected
+            </div>
+            <p className="font-body tnum" style={{ fontSize: 13.5, color: C.muted, marginBottom: 28 }}>
+              {wallet}
+            </p>
+            <Button variant="up" full glow onClick={onContinue} ariaLabel="Continue to dashboard">
+              <span className="flex items-center justify-center gap-2">Continue to Dashboard <ArrowUpRight size={14} /></span>
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ──────────────────── Dashboard root ──────────────────── */
 
 export default function OracleDashboard({ onExit }) {
+  const [onboarded, setOnboarded] = useState(() => {
+    try { return localStorage.getItem("oracle_onboarded") === "1"; } catch { return false; }
+  });
   const [view, setView] = useState("feed");
   const [detail, setDetail] = useState(null);
   const [wallet, setWallet] = useState(null);
@@ -2614,6 +2672,11 @@ export default function OracleDashboard({ onExit }) {
 
   const connectWallet = () => setWalletModalOpen(true);
 
+  const finishOnboarding = () => {
+    setOnboarded(true);
+    try { localStorage.setItem("oracle_onboarded", "1"); } catch { /* private browsing — non-fatal */ }
+  };
+
   const handleWalletConnect = async (type) => {
     try {
       if (type === "metamask") {
@@ -2741,6 +2804,16 @@ export default function OracleDashboard({ onExit }) {
 
   const bgImage = "/spheres-bg.png";
   const bgClass = "bg-drift-alt";
+
+  if (!onboarded) {
+    return (
+      <div className="orc-root font-body">
+        <GlobalStyles />
+        <OnboardingScreen wallet={wallet} connectWallet={connectWallet} onContinue={finishOnboarding} onSkip={finishOnboarding} />
+        {walletModalOpen && <WalletModal onConnect={handleWalletConnect} onClose={() => setWalletModalOpen(false)} />}
+      </div>
+    );
+  }
 
   return (
     <div className="orc-root font-body" style={{ background: C.bg, minHeight: "100vh", color: C.text, position: "relative" }}>
