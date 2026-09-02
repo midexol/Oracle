@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1788258705715,
+      "tag": "0000_damp_dark_beast",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788260905831,
+      "tag": "0001_add_idempotency_and_battle_pairing",
+      "breakpoints": true
+    }
+  ]
+}
