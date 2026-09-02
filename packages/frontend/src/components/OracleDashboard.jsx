@@ -20,6 +20,7 @@ import {
   Target,
 } from "lucide-react";
 import TradingViewChart, { marketToSymbol, marketToInterval } from "./TradingViewChart";
+import { getLeaderboard, getUserProfile, createPrediction } from "../services/api.js";
 
 /* ================================================================== *
  *  ORACLE - product dashboard (premium redesign)
@@ -97,32 +98,35 @@ const GlobalStyles = () => (
     .glow-btn-down { animation: btnGlowDown 3.5s ease-in-out infinite; }
     .glow-btn-gold { animation: btnGlowGold 3.5s ease-in-out infinite; }
 
-    /* Wallet connect — subtle red/green line glow hugging the button border */
-    @keyframes walletGlowSpin { to { transform: rotate(360deg); } }
-    .wallet-glow-wrap { position: relative; z-index: 0; }
+    /* Wallet connect — red/green flowing border like chat thinking indicator */
+    @keyframes borderFlow { 
+      0% { background-position: 0% 0%; }
+      100% { background-position: 100% 0%; }
+    }
+    .wallet-glow-wrap { 
+      position: relative; 
+      z-index: 0;
+      display: inline-block;
+    }
     .wallet-glow-wrap::before {
       content: "";
       position: absolute;
-      inset: -1.5px;
+      inset: -2px;
       border-radius: inherit;
-      padding: 1.25px;
-      background: conic-gradient(from 0deg,
-        rgba(32,229,138,0)    0deg,
-        rgba(32,229,138,0.9)  40deg,
-        rgba(32,229,138,0)   100deg,
-        rgba(255,82,99,0)    170deg,
-        rgba(255,82,99,0.9)  220deg,
-        rgba(255,82,99,0)    280deg,
-        rgba(32,229,138,0)   360deg);
-      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      padding: 2px;
+      background: linear-gradient(90deg, #20E58A, #FF5263, #20E58A, #FF5263, #20E58A);
+      background-size: 200% 100%;
+      animation: borderFlow 2s linear infinite;
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
       -webkit-mask-composite: xor;
       mask-composite: exclude;
-      filter: blur(0.6px);
-      animation: walletGlowSpin 5s linear infinite;
       pointer-events: none;
       z-index: -1;
     }
-    .wallet-glow-wrap > .btn { position: relative; z-index: 1; }
+    .wallet-glow-wrap > .btn { 
+      position: relative; 
+      z-index: 1;
+    }
 
     /* Background parallax — kept well within the oversized image so the
        drift never pans past its edge and exposes bare space at a viewport
@@ -288,6 +292,42 @@ const GlobalStyles = () => (
     .orc-root .nav-links { display: flex; align-items: center; gap: 30px; }
     .orc-root .bottom-nav { display: none; }
 
+    /* Desktop sidebar nav */
+    .orc-root .app-topbar-row { display: none; }
+    .orc-root .app-sidebar {
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0; left: 0; bottom: 0;
+      width: 220px;
+      padding: 22px 14px;
+      background: rgba(7,9,13,0.92);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border-right: 1px solid rgba(255,255,255,0.06);
+      z-index: 25;
+      gap: 4px;
+    }
+    .orc-root .app-sidebar-logo {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 10px 26px;
+      background: none; border: none; cursor: pointer;
+    }
+    .orc-root .app-sidebar-link {
+      display: flex; align-items: center; gap: 12px;
+      width: 100%; text-align: left;
+      background: none; border: none; cursor: pointer;
+      padding: 11px 14px; border-radius: 10px;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 13.5px; font-weight: 600;
+      color: ${C.muted};
+      transition: background .15s ease, color .15s ease;
+    }
+    .orc-root .app-sidebar-link:hover { background: rgba(255,255,255,0.05); color: ${C.text}; }
+    .orc-root .app-sidebar-link.active { background: rgba(32,229,138,0.1); color: ${C.up}; }
+    .orc-root .app-sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+    .orc-root .app-shell-content { padding-left: 220px; }
+
     .orc-root .market-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .orc-root .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
     .orc-root .battle-grid { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 18px; }
@@ -307,17 +347,224 @@ const GlobalStyles = () => (
       will-change: transform;
     }
 
+    /* ── Mobile optimizations — no overlapping ── */
+    @media (max-width: 1024px) {
+      .orc-root .container { padding: 0 20px; }
+      .orc-root .page { padding: 24px 0; }
+      .orc-root .glass-card { border-radius: 12px; }
+      .orc-root h1 { font-size: clamp(24px, 5vw, 48px); }
+    }
+    
     @media (max-width: 768px) {
       .orc-root .nav-links { display: none; }
       .orc-root .bottom-nav { display: flex; }
-      .orc-root .page { padding-bottom: 96px; }
-      .nav-pill-tabs { display: none; }
-    }
-    @media (max-width: 640px) {
-      .orc-root .market-grid { grid-template-columns: 1fr; }
-      .orc-root .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 18px 0; }
-      .orc-root .battle-grid { grid-template-columns: 1fr; text-align: center; }
+      .orc-root .page { padding: 24px 0 120px 0; }
+      .orc-root .nav-pill-tabs { display: none; }
       .orc-root .container { padding: 0 16px; }
+      .orc-root .app-sidebar { display: none; }
+      .orc-root .app-topbar-row { display: flex; }
+      .orc-root .app-shell-content { padding-left: 0; }
+      
+      /* Better spacing on tablet */
+      .orc-root .glass-card { padding: 16px !important; border-radius: 12px; }
+      .orc-root .pred-card { border-radius: 12px; }
+      .orc-root .pred-card .btn { min-height: 44px; }
+      
+      /* Fix grid layouts */
+      .orc-root .market-grid { grid-template-columns: 1fr; gap: 16px; }
+      .orc-root .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; }
+      .orc-root .battle-grid { grid-template-columns: 1fr; gap: 12px; text-align: center; }
+      
+      /* Better button sizing */
+      .orc-root .btn { 
+        min-height: 44px; 
+        padding: 12px 18px !important;
+        border-radius: 10px;
+        font-size: 13px;
+      }
+      
+      /* Modal adjustments */
+      .glass-card { 
+        width: calc(100% - 32px) !important;
+        max-width: 100% !important;
+        margin: 0 auto;
+      }
+      
+      /* Profile optimizations */
+      .orc-root .profile-hero { margin-bottom: 16px; }
+      .orc-root .profile-hero .flex { flex-wrap: wrap; gap: 16px; }
+      
+      /* Fix prediction detail view */
+      .orc-root .container.page { max-width: 100% !important; }
+    }
+    
+    @media (max-width: 640px) {
+      .orc-root .container { padding: 0 12px; }
+      .orc-root .page { padding: 20px 0 120px 0; }
+      
+      /* Responsive typography */
+      .orc-root h1 { font-size: clamp(20px, 4vw, 36px); line-height: 1.2; }
+      .orc-root h2 { font-size: clamp(18px, 3.5vw, 28px); }
+      
+      /* Better spacing for small screens */
+      .orc-root .glass-card { 
+        padding: 14px !important; 
+        border-radius: 10px;
+        margin-bottom: 12px;
+      }
+      .orc-root .pred-card { 
+        border-radius: 10px;
+        padding: 0 !important;
+      }
+      
+      /* Grid fixes */
+      .orc-root .market-grid { grid-template-columns: 1fr; gap: 12px; }
+      .orc-root .stats-grid { 
+        grid-template-columns: repeat(2, 1fr); 
+        gap: 12px; 
+      }
+      .orc-root .battle-grid { 
+        grid-template-columns: 1fr; 
+        gap: 10px; 
+        text-align: center; 
+      }
+      
+      /* Touch-friendly buttons */
+      .orc-root .btn {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 12px 16px !important;
+        border-radius: 8px;
+        font-size: 12px;
+        width: 100%;
+      }
+      
+      .orc-root .btn.full { width: 100%; }
+      
+      /* Nav adjustments */
+      .orc-root .page { margin-top: 0; }
+      .orc-root nav { height: auto; }
+      
+      /* Feed cards */
+      .orc-root .pred-card { 
+        border-radius: 10px;
+        overflow: hidden;
+        margin-bottom: 12px;
+      }
+      .orc-root .pred-card .flex { flex-wrap: wrap; gap: 8px; }
+      
+      /* Avatar sizing */
+      .orc-root .avatar { width: 32px; height: 32px; }
+      
+      /* Modal fixes */
+      .glass-card {
+        width: calc(100% - 24px) !important;
+        max-width: calc(100% - 24px) !important;
+        margin: 0 auto;
+        padding: 20px !important;
+        border-radius: 14px;
+      }
+      
+      /* Trade modal */
+      .orc-root .trade-split { 
+        display: flex; 
+        gap: 8px;
+      }
+      .orc-root .trade-split button { 
+        flex: 1;
+        min-height: 48px;
+      }
+      
+      /* Profile page */
+      .orc-root .profile-hero {
+        padding: 16px;
+        border-radius: 12px;
+        margin-bottom: 16px;
+      }
+      .orc-root .profile-hero .text-right { text-align: left; }
+
+      /* Leaderboard */
+      .orc-root .podium-bar { min-height: 60px; }
+      .orc-root .avatar { margin: 0 auto; }
+      
+      /* Prevent overlapping in list items */
+      .orc-root .hover-row {
+        padding: 12px 14px;
+        gap: 12px;
+        min-height: 52px;
+      }
+      
+      /* Better padding for sections */
+      .orc-root [style*="padding"] { 
+        padding: 14px !important;
+      }
+      
+      /* Ticker adjustments */
+      .ticker-track { font-size: 10px; }
+      
+      /* Input fields */
+      .orc-root input { 
+        min-height: 44px;
+        padding: 10px 12px !important;
+        border-radius: 8px;
+        font-size: 14px;
+      }
+      
+      /* Select/dropdown like elements */
+      .orc-root button[style*="select"], 
+      .orc-root button[style*="Select"] {
+        min-height: 40px;
+        padding: 8px 12px;
+      }
+      
+      /* Fix battle view layout */
+      .orc-root .battle-grid { 
+        grid-template-columns: 1fr;
+      }
+      
+      /* Better spacing in flex containers */
+      .orc-root .flex { gap: 8px !important; }
+      .orc-root .flex.items-center { gap: 8px; }
+      
+      /* Prevent text overflow */
+      .orc-root .font-display,
+      .orc-root .font-body {
+        word-break: break-word;
+        overflow-wrap: break-word;
+      }
+      
+      /* Wallet button alignment */
+      .orc-root .wallet-glow-wrap { display: block; width: 100%; }
+      
+      /* Better margin for sections */
+      .orc-root .container.page > div { margin-bottom: 16px; }
+    }
+    
+    @media (max-width: 480px) {
+      .orc-root .container { padding: 0 10px; }
+      .orc-root .page { padding: 16px 0 120px 0; }
+      
+      /* Extra small screen optimizations */
+      .orc-root h1 { font-size: clamp(18px, 3.5vw, 28px); }
+      .orc-root .glass-card { padding: 12px !important; }
+      .orc-root .btn { font-size: 11px; padding: 10px 12px !important; }
+      
+      /* Reduce gaps on very small screens */
+      .orc-root .flex { gap: 6px !important; }
+      .orc-root .market-grid,
+      .orc-root .stats-grid { gap: 10px; }
+      
+      /* Compact modals */
+      .glass-card { width: calc(100% - 16px) !important; padding: 14px !important; }
+      
+      /* Single column everything */
+      .orc-root [style*="grid-template-columns"] {
+        grid-template-columns: 1fr !important;
+      }
+      
+      /* Fix overlapping text */
+      .orc-root .font-display { font-size: 14px; }
+      .orc-root .font-body { font-size: 12px; }
     }
 
     /* ── Ultra-minimal scrollbar ── */
@@ -677,19 +924,94 @@ function Nav({ view, setView, wallet, walletBalance, connectWallet, onExit, tick
     ["battle", "Battles", Flame],
     ["profile", "Profile", User],
   ];
+  const sidebarItems = [
+    ["feed", "Discover", Compass],
+    ["market", "Markets", LineChart],
+    ["predict", "Predict", Target],
+    ["battle", "Battles", Flame],
+    ["leaderboard", "Rankings", Trophy],
+  ];
 
   const mainViews = ["feed", "market", "predict", "battle", "leaderboard"];
   const activeTab = view === "profile" ? "profile" : mainViews.includes(view) ? view : null;
 
   return (
-    <div style={{
-      position: "sticky", top: 0, zIndex: 20,
-      background: "rgba(5,7,10,0.9)",
-      backdropFilter: "blur(18px)",
-      WebkitBackdropFilter: "blur(18px)",
-      borderBottom: "1px solid rgba(255,255,255,0.06)",
-    }}>
-      <div className="container flex items-center justify-between" style={{ height: 62 }}>
+    <>
+      {/* Desktop sidebar */}
+      <aside className="app-sidebar" aria-label="Main navigation">
+        <button
+          onClick={() => setView("feed")}
+          className="app-sidebar-logo link-btn"
+          aria-label="Oracle home"
+        >
+          <OracleLogo size={19} color={C.text} />
+          <span className="font-display" style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-0.01em", color: C.text }}>ORACLE</span>
+        </button>
+
+        <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {sidebarItems.map(([key, label, Icon]) => (
+            <button
+              key={key}
+              onClick={() => setView(key)}
+              className={`app-sidebar-link ${activeTab === key ? "active" : ""}`}
+              aria-current={activeTab === key ? "page" : undefined}
+            >
+              <Icon size={18} strokeWidth={2} />
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="app-sidebar-footer">
+          <button
+            onClick={() => setView("profile")}
+            className={`app-sidebar-link ${view === "profile" ? "active" : ""}`}
+            aria-current={view === "profile" ? "page" : undefined}
+          >
+            <User size={18} strokeWidth={2} />
+            Profile
+          </button>
+          {wallet ? (
+            <button
+              onClick={() => setView("profile")}
+              className="font-body tnum flex items-center gap-2 link-btn"
+              style={{
+                fontSize: 12, color: C.text,
+                background: "rgba(18,22,30,0.8)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                padding: "9px 12px", borderRadius: 10, cursor: "pointer",
+              }}
+              aria-label="View your profile"
+            >
+              <span style={{ width: 6, height: 6, borderRadius: 999, background: C.up, display: "inline-block", boxShadow: `0 0 6px ${C.up}` }} />
+              {wallet}
+            </button>
+          ) : (
+            <Button variant="ghost" onClick={connectWallet} ariaLabel="Connect wallet" walletGlow full>
+              <span className="flex items-center gap-2"><Wallet size={13} /> Connect</span>
+            </Button>
+          )}
+          {onExit && (
+            <button
+              onClick={onExit}
+              className="font-body link-btn"
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: C.muted, display: "flex", alignItems: "center", gap: 5, padding: "8px 10px" }}
+              aria-label="Back to site"
+            >
+              <ArrowLeft size={14} strokeWidth={2} /> Back to site
+            </button>
+          )}
+        </div>
+      </aside>
+
+      <div style={{
+        position: "sticky", top: 0, zIndex: 20,
+        background: "rgba(5,7,10,0.9)",
+        backdropFilter: "blur(18px)",
+        WebkitBackdropFilter: "blur(18px)",
+        borderBottom: "1px solid rgba(255,255,255,0.06)",
+      }}>
+      <div className="app-topbar-row container flex items-center justify-between" style={{ height: 62 }}>
         {/* Left: logo + back */}
         <div className="flex items-center" style={{ gap: 20 }}>
           {onExit && (
@@ -773,8 +1095,11 @@ function Nav({ view, setView, wallet, walletBalance, connectWallet, onExit, tick
       </div>
 
       <TickerStrip tickerData={tickerData} />
+      </div>
 
-      {/* Mobile bottom nav */}
+      {/* Mobile bottom nav — rendered outside the backdrop-filtered header,
+          since backdrop-filter creates a containing block for fixed descendants
+          and would pin "bottom:0" to the header box instead of the viewport. */}
       <div className="bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "rgba(7,9,13,0.95)", backdropFilter: "blur(16px)", borderTop: `1px solid rgba(255,255,255,0.07)`, zIndex: 30, padding: "8px 0 10px" }}>
         <div className="flex items-center justify-around" style={{ width: "100%" }}>
       {mobileItems.map(([key, label, Icon]) => (
@@ -791,7 +1116,7 @@ function Nav({ view, setView, wallet, walletBalance, connectWallet, onExit, tick
           ))}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -898,19 +1223,19 @@ function CreatePredModal({ onClose, onSubmit }) {
   const markets = ["BTC 15M", "BTC 1H", "ETH 15M", "ETH 1H", "SOL 15M"];
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(4,5,7,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20 }} onClick={onClose}>
-      <div className="rise-in glass-card" style={{ padding: 28, width: 360 }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(4,5,7,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: "16px", overflowY: "auto" }} onClick={onClose}>
+      <div className="rise-in glass-card" style={{ padding: "clamp(16px, 3vw, 28px)", width: "clamp(280px, 90vw, 400px)", maxWidth: "100%" }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between" style={{ marginBottom: 22 }}>
-          <div className="font-display" style={{ fontSize: 18, color: C.text, fontWeight: 700 }}>Make a Prediction</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.muted }}><XIcon size={16} /></button>
+          <div className="font-display" style={{ fontSize: "clamp(14px, 3vw, 18px)", color: C.text, fontWeight: 700 }}>Make a Prediction</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, flexShrink: 0 }}><XIcon size={16} /></button>
         </div>
 
         <div style={{ marginBottom: 16 }}>
-          <div className="font-body" style={{ fontSize: 11, color: C.muted, fontWeight: 700, letterSpacing: "0.10em", marginBottom: 8 }}>MARKET</div>
+          <div className="font-body" style={{ fontSize: "clamp(10px, 1.8vw, 11px)", color: C.muted, fontWeight: 700, letterSpacing: "0.10em", marginBottom: 8 }}>MARKET</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {markets.map(m => (
               <button key={m} onClick={() => setMarket(m)} className="font-body"
-                style={{ padding: "6px 12px", borderRadius: 999, border: `1px solid ${market === m ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`, background: market === m ? "rgba(255,255,255,0.1)" : "transparent", color: market === m ? C.text : C.muted, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                style={{ padding: "6px 12px", borderRadius: 999, border: `1px solid ${market === m ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`, background: market === m ? "rgba(255,255,255,0.1)" : "transparent", color: market === m ? C.text : C.muted, fontSize: "clamp(11px, 1.8vw, 12.5px)", fontWeight: 600, cursor: "pointer", minHeight: 32 }}>
                 {m}
               </button>
             ))}
@@ -918,11 +1243,11 @@ function CreatePredModal({ onClose, onSubmit }) {
         </div>
 
         <div style={{ marginBottom: 16 }}>
-          <div className="font-body" style={{ fontSize: 11, color: C.muted, fontWeight: 700, letterSpacing: "0.10em", marginBottom: 8 }}>PREDICTION</div>
+          <div className="font-body" style={{ fontSize: "clamp(10px, 1.8vw, 11px)", color: C.muted, fontWeight: 700, letterSpacing: "0.10em", marginBottom: 8 }}>PREDICTION</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {["UP", "DOWN"].map(d => (
               <button key={d} onClick={() => setDir(d)}
-                style={{ padding: "14px", borderRadius: 10, border: `1px solid ${dir === d ? (d === "UP" ? C.upBorder : C.downBorder) : "rgba(255,255,255,0.07)"}`, background: dir === d ? (d === "UP" ? C.upSoft : C.downSoft) : "transparent", color: dir === d ? (d === "UP" ? C.up : C.down) : C.muted, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans',sans-serif", letterSpacing: "0.04em", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                style={{ padding: "14px", borderRadius: 10, border: `1px solid ${dir === d ? (d === "UP" ? C.upBorder : C.downBorder) : "rgba(255,255,255,0.07)"}`, background: dir === d ? (d === "UP" ? C.upSoft : C.downSoft) : "transparent", color: dir === d ? (d === "UP" ? C.up : C.down) : C.muted, fontSize: "clamp(12px, 2vw, 14px)", fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans',sans-serif", letterSpacing: "0.04em", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, minHeight: 44 }}>
                 {d === "UP" ? <ChevronUp size={16} strokeWidth={3} /> : <ChevronDown size={16} strokeWidth={3} />} {d}
               </button>
             ))}
@@ -930,11 +1255,11 @@ function CreatePredModal({ onClose, onSubmit }) {
         </div>
 
         <div style={{ marginBottom: 22 }}>
-          <div className="font-body" style={{ fontSize: 11, color: C.muted, fontWeight: 700, letterSpacing: "0.10em", marginBottom: 8 }}>STAKE</div>
+          <div className="font-body" style={{ fontSize: "clamp(10px, 1.8vw, 11px)", color: C.muted, fontWeight: 700, letterSpacing: "0.10em", marginBottom: 8 }}>STAKE</div>
           <div style={{ display: "flex", gap: 6 }}>
             {[5, 10, 25, 50].map(v => (
               <button key={v} onClick={() => setStake(v)} className="font-body tnum"
-                style={{ flex: 1, padding: "10px 8px", borderRadius: 8, border: `1px solid ${stake === v ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`, background: stake === v ? "rgba(255,255,255,0.09)" : "transparent", color: stake === v ? C.text : C.muted, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                style={{ flex: 1, padding: "10px 8px", borderRadius: 8, border: `1px solid ${stake === v ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`, background: stake === v ? "rgba(255,255,255,0.09)" : "transparent", color: stake === v ? C.text : C.muted, fontSize: "clamp(11px, 2vw, 13px)", fontWeight: 700, cursor: "pointer", minHeight: 40 }}>
                 ${v}
               </button>
             ))}
@@ -943,7 +1268,7 @@ function CreatePredModal({ onClose, onSubmit }) {
 
         <Button variant={dir === "UP" ? "up" : "down"} full glow
           onClick={() => onSubmit({ market, dir, stake })}
-          style={{ borderRadius: 12, fontSize: 14, padding: "15px" }}>
+          style={{ borderRadius: 12, fontSize: "clamp(12px, 2vw, 14px)", padding: "14px", minHeight: 44 }}>
           Predict {dir} · ${stake}
         </Button>
       </div>
@@ -1064,7 +1389,7 @@ function PredictView({ marketOptions, onSubmit, wallet, connectWallet }) {
         />
       </Panel>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }} className="pred-controls">
         {/* Direction picker */}
         <Panel pad={16}>
           <SectionLabel>Your Prediction</SectionLabel>
@@ -1074,11 +1399,11 @@ function PredictView({ marketOptions, onSubmit, wallet, connectWallet }) {
                 key={d}
                 onClick={() => setDir(d)}
                 style={{
-                  padding: "18px 12px", borderRadius: 12, cursor: "pointer",
+                  padding: "18px 12px", borderRadius: 12, cursor: "pointer", minHeight: 44,
                   border: `1px solid ${dir === d ? (d === "UP" ? C.upBorder : C.downBorder) : "rgba(255,255,255,0.07)"}`,
                   background: dir === d ? (d === "UP" ? C.upSoft : C.downSoft) : "transparent",
                   color: dir === d ? (d === "UP" ? C.up : C.down) : C.muted,
-                  fontSize: 15, fontWeight: 800, fontFamily: "'Plus Jakarta Sans',sans-serif",
+                  fontSize: "clamp(12px, 2vw, 15px)", fontWeight: 800, fontFamily: "'Plus Jakarta Sans',sans-serif",
                   letterSpacing: "0.04em", display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
                 }}
               >
@@ -1099,11 +1424,11 @@ function PredictView({ marketOptions, onSubmit, wallet, connectWallet }) {
                 onClick={() => setStake(v)}
                 className="font-body tnum"
                 style={{
-                  padding: "14px 8px", borderRadius: 10, cursor: "pointer",
+                  padding: "14px 8px", borderRadius: 10, cursor: "pointer", minHeight: 44,
                   border: `1px solid ${stake === v ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`,
                   background: stake === v ? "rgba(255,255,255,0.09)" : "transparent",
                   color: stake === v ? C.text : C.muted,
-                  fontSize: 15, fontWeight: 700,
+                  fontSize: "clamp(11px, 1.8vw, 15px)", fontWeight: 700,
                 }}
               >
                 ${v}
@@ -1112,6 +1437,12 @@ function PredictView({ marketOptions, onSubmit, wallet, connectWallet }) {
           </div>
         </Panel>
       </div>
+      
+      <style>{`
+        @media (max-width: 768px) {
+          .pred-controls { grid-template-columns: 1fr !important; gap: 12px !important; }
+        }
+      `}</style>
 
       {submitted ? (
         <div className="flex items-center justify-center gap-2 font-display" style={{ padding: "16px", borderRadius: 12, background: C.upSoft, border: `1px solid ${C.upBorder}`, color: C.up, fontWeight: 700, fontSize: 14 }}>
@@ -1272,7 +1603,7 @@ function OrderBook({ book, status }) {
     );
   }
 
-  if (!book) {
+  if (!book || (book.asks.length === 0 && book.bids.length === 0)) {
     return (
       <Panel pad={14}>
         <SectionLabel right={<span className="font-body tnum" style={{ fontSize: 10.5, color: C.faint }}>SIZE</span>}>Order Book</SectionLabel>
@@ -1281,10 +1612,11 @@ function OrderBook({ book, status }) {
     );
   }
 
-  const asks = [...book.asks].sort((a, b) => b[0] - a[0]);
-  const bids = [...book.bids].sort((a, b) => b[0] - a[0]);
-  const maxSize = Math.max(...asks.map((a) => a[1]), ...bids.map((b) => b[1]), 1);
-  const spread = asks.length && bids.length ? asks[asks.length - 1][0] - bids[0][0] : 0;
+  const asks = book.asks && book.asks.length > 0 ? [...book.asks].sort((a, b) => b[0] - a[0]) : [];
+  const bids = book.bids && book.bids.length > 0 ? [...book.bids].sort((a, b) => b[0] - a[0]) : [];
+  const allSizes = [...asks.map((a) => a[1] || 0), ...bids.map((b) => b[1] || 0)];
+  const maxSize = allSizes.length > 0 ? Math.max(...allSizes, 1) : 1;
+  const spread = asks.length > 0 && bids.length > 0 ? Math.max(0, asks[asks.length - 1][0] - bids[0][0]) : 0;
 
   return (
     <Panel pad={14}>
@@ -1308,7 +1640,7 @@ function RecentTrades({ trades, status }) {
     );
   }
 
-  if (!trades) {
+  if (!trades || trades.length === 0) {
     return (
       <Panel pad={14}>
         <SectionLabel>Recent Trades</SectionLabel>
@@ -1318,15 +1650,21 @@ function RecentTrades({ trades, status }) {
   }
 
   const now = Date.now();
+  const validTrades = trades.filter((t) => t && t.ts && t.price && t.size !== undefined);
+  
   return (
     <Panel pad={14}>
       <SectionLabel>Recent Trades</SectionLabel>
-      {trades.map((t, i) => (
-        <div key={t.ts + "-" + i} className="flex justify-between font-body tnum row-in" style={{ fontSize: 12, padding: "5px 2px", animationDelay: `${i * 60}ms` }}>
-          <span style={{ color: t.side === "UP" ? C.up : C.down, fontWeight: 600 }}>{t.side} ${t.price.toFixed(2)}</span>
-          <span style={{ color: C.faint }}>{t.size.toFixed(4)} · {formatTimeAgo(now - t.ts)}</span>
-        </div>
-      ))}
+      {validTrades.length > 0 ? (
+        validTrades.map((t, i) => (
+          <div key={t.ts + "-" + i} className="flex justify-between font-body tnum row-in" style={{ fontSize: 12, padding: "5px 2px", animationDelay: `${i * 60}ms` }}>
+            <span style={{ color: t.side === "UP" ? C.up : C.down, fontWeight: 600 }}>{t.side} ${Number(t.price).toFixed(2)}</span>
+            <span style={{ color: C.faint }}>{Number(t.size).toFixed(4)} · {formatTimeAgo(now - t.ts)}</span>
+          </div>
+        ))
+      ) : (
+        <div className="font-body" style={{ fontSize: 12, color: C.faint, padding: "12px 4px", textAlign: "center" }}>Waiting for trades...</div>
+      )}
     </Panel>
   );
 }
@@ -1501,68 +1839,109 @@ function PredictionDetailView({ p, onOpenMarket, onOpenProfile, onBack }) {
 
 /* ──────────────────── Profile page ──────────────────── */
 
-function ProfileView({ onOpenReceipt }) {
+function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt }) {
   const [activeTab, setActiveTab] = useState("history");
   const tabs = ["history", "specialties", "stats"];
+
+  const hasRealProfile = Boolean(walletAddress && profile);
+
+  const view = hasRealProfile
+    ? {
+        name: profile.username || shortAddress(profile.wallet),
+        initials: profile.username ? profile.username.slice(0, 2).toUpperCase() : profile.wallet.slice(2, 4).toUpperCase(),
+        joined: null,
+        score: Math.round(profile.predictionScore),
+        accuracy: Math.round(profile.winRate),
+        count: profile.totalPredictions,
+        correct: profile.totalWins,
+        specialties: profile.categoryBreakdown.map((c) => ({ market: c.label, acc: Math.round(c.accuracy) })),
+        history: profile.history.map((h) => ({
+          market: h.market,
+          dir: h.dir,
+          price: h.price,
+          result: h.result === "WON" ? "win" : "loss",
+        })),
+      }
+    : { ...predictor, initials: "MD" };
+
+  if (walletAddress && profileLoading && !profile) {
+    return (
+      <div className="container page" style={{ maxWidth: 640 }}>
+        <div className="skeleton" style={{ height: 300, borderRadius: 12 }} />
+      </div>
+    );
+  }
 
   return (
     <div className="container page" style={{ maxWidth: 640 }}>
 
       {/* Hero card */}
       <div className="profile-hero" style={{ marginBottom: 20 }}>
-        <div className="flex items-start justify-between" style={{ marginBottom: 20 }}>
-          <div className="flex items-center gap-4">
+        <div className="flex items-start justify-between" style={{ marginBottom: 20, gap: 16, flexWrap: "wrap" }}>
+          <div className="flex items-center gap-4" style={{ flexWrap: "wrap" }}>
             <div style={{ position: "relative" }}>
-              <Avatar initials="MD" size={64} live />
+              <Avatar initials={view.initials} size={64} live />
               <div style={{
                 position: "absolute", inset: -3, borderRadius: 999,
                 border: "1.5px solid rgba(32,229,138,0.3)",
                 boxShadow: "0 0 16px rgba(32,229,138,0.2)",
               }} />
             </div>
-            <div>
-              <div className="font-display" style={{ fontSize: 24, color: C.text, fontWeight: 700, letterSpacing: "-0.03em", marginBottom: 2 }}>Mide</div>
-              <div className="font-body" style={{ fontSize: 11.5, color: C.muted }}>Predictor since {predictor.joined}</div>
+            <div style={{ minWidth: 0 }}>
+              <div className="font-display" style={{ fontSize: "clamp(18px, 4vw, 24px)", color: C.text, fontWeight: 700, letterSpacing: "-0.03em", marginBottom: 2 }}>{view.name}</div>
+              {view.joined && <div className="font-body" style={{ fontSize: "clamp(10px, 2vw, 11.5px)", color: C.muted }}>Predictor since {view.joined}</div>}
               <div className="flex items-center gap-2" style={{ marginTop: 6 }}>
                 <span style={{
                   fontSize: 10, fontWeight: 700, letterSpacing: "0.1em",
                   color: C.text, background: "rgba(255,255,255,0.08)",
                   border: "1px solid rgba(255,255,255,0.16)",
                   padding: "2px 8px", borderRadius: 999,
-                }}>{scoreTier(predictor.score)}</span>
+                }}>{scoreTier(view.score)}</span>
               </div>
             </div>
           </div>
-          <div className="flex" style={{ gap: 8 }}>
-            <Button variant="ghost" glow style={{ fontSize: 12, padding: "9px 16px" }}>
+          <div className="flex" style={{ gap: 8, flexWrap: "wrap" }}>
+            <Button variant="ghost" glow style={{ fontSize: 12, padding: "9px 12px" }}>
               <span className="flex items-center gap-1.5"><Star size={12} />Follow</span>
             </Button>
-            <Button variant="ghost" style={{ fontSize: 12, padding: "9px 16px" }}>
+            <Button variant="ghost" style={{ fontSize: 12, padding: "9px 12px" }}>
               <span className="flex items-center gap-1.5"><Share2 size={12} />Share</span>
             </Button>
           </div>
         </div>
 
-        {/* Score gauge + stats */}
-        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr", gap: 24, alignItems: "center" }}>
+        {/* Score gauge + stats — responsive grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr", gap: 24, alignItems: "center", gridAutoFlow: "dense" }} className="profile-stats-grid">
           <div className="flex flex-col items-center gap-1">
-            <ScoreGauge score={predictor.score} size={80} />
+            <ScoreGauge score={view.score} size={80} />
             <div className="font-body" style={{ fontSize: 10, color: C.muted, fontWeight: 700, letterSpacing: "0.08em" }}>ORACLE SCORE</div>
           </div>
           <div className="text-center">
-            <div className="font-display tnum" style={{ fontSize: 26, fontWeight: 700, color: C.text, letterSpacing: "-0.03em" }}>{predictor.accuracy}%</div>
-            <div className="font-body" style={{ fontSize: 10.5, color: C.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Accuracy</div>
+            <div className="font-display tnum" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.text, letterSpacing: "-0.03em" }}>{view.accuracy}%</div>
+            <div className="font-body" style={{ fontSize: "clamp(9px, 1.8vw, 10.5px)", color: C.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Accuracy</div>
           </div>
           <div className="text-center">
-            <div className="font-display tnum" style={{ fontSize: 26, fontWeight: 700, color: C.text, letterSpacing: "-0.03em" }}>{predictor.count}</div>
-            <div className="font-body" style={{ fontSize: 10.5, color: C.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Predictions</div>
+            <div className="font-display tnum" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.text, letterSpacing: "-0.03em" }}>{view.count}</div>
+            <div className="font-body" style={{ fontSize: "clamp(9px, 1.8vw, 10.5px)", color: C.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Predictions</div>
           </div>
           <div className="text-center">
-            <div className="font-display tnum" style={{ fontSize: 26, fontWeight: 700, color: C.up, letterSpacing: "-0.03em" }}>{predictor.correct}</div>
-            <div className="font-body" style={{ fontSize: 10.5, color: C.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Correct</div>
+            <div className="font-display tnum" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.up, letterSpacing: "-0.03em" }}>{view.correct}</div>
+            <div className="font-body" style={{ fontSize: "clamp(9px, 1.8vw, 10.5px)", color: C.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Correct</div>
           </div>
         </div>
       </div>
+      
+      <style>{`
+        @media (max-width: 640px) {
+          .orc-root .profile-hero .profile-stats-grid {
+            grid-template-columns: 1fr 1fr !important;
+            gap: 16px !important;
+          }
+          .orc-root .container .profile-stats-tab-grid {
+            grid-template-columns: 1fr 1fr !important;
+          }
+        }
+      `}</style>
 
       {/* Tabs */}
       <div className="flex" style={{ gap: 2, marginBottom: 20, background: "rgba(13,16,22,0.7)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 4 }}>
@@ -1591,7 +1970,10 @@ function ProfileView({ onOpenReceipt }) {
           <div style={{ padding: "16px 18px 6px" }}>
             <SectionLabel>Prediction History</SectionLabel>
           </div>
-          {predictor.history.map((h, i) => {
+          {view.history.length === 0 && (
+            <div className="font-body" style={{ fontSize: 12, color: C.faint, padding: "20px", textAlign: "center" }}>No predictions yet</div>
+          )}
+          {view.history.map((h, i) => {
             const win = h.result === "win";
             return (
               <button
@@ -1637,8 +2019,11 @@ function ProfileView({ onOpenReceipt }) {
       {activeTab === "specialties" && (
         <Panel pad={20}>
           <SectionLabel>Market Specialties</SectionLabel>
+          {view.specialties.length === 0 && (
+            <div className="font-body" style={{ fontSize: 12, color: C.faint, textAlign: "center" }}>No category data yet</div>
+          )}
           <div className="flex flex-col" style={{ gap: 18 }}>
-            {predictor.specialties.map((s, i) => (
+            {view.specialties.map((s, i) => (
               <div key={i}>
                 <div className="flex justify-between font-body" style={{ fontSize: 13.5, color: C.text, marginBottom: 8 }}>
                   <span style={{ fontWeight: 600 }}>{s.market}</span>
@@ -1654,12 +2039,12 @@ function ProfileView({ onOpenReceipt }) {
       )}
 
       {activeTab === "stats" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="profile-stats-tab-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {[
-            { label: "Win Rate", value: predictor.accuracy + "%", accent: C.up },
-            { label: "Total Preds", value: predictor.count, accent: C.text },
-            { label: "Correct", value: predictor.correct, accent: C.up },
-            { label: "Oracle Score", value: predictor.score, accent: C.gold },
+            { label: "Win Rate", value: view.accuracy + "%", accent: C.up },
+            { label: "Total Preds", value: view.count, accent: C.text },
+            { label: "Correct", value: view.correct, accent: C.up },
+            { label: "Oracle Score", value: view.score, accent: C.gold },
           ].map((s, i) => (
             <Panel key={i} pad={20}>
               <div className="font-display tnum" style={{ fontSize: 30, fontWeight: 700, color: s.accent, letterSpacing: "-0.03em", marginBottom: 4 }}>{s.value}</div>
@@ -1674,15 +2059,38 @@ function ProfileView({ onOpenReceipt }) {
 
 /* ──────────────────── Leaderboard (image 7 style) ──────────────────── */
 
-function LeaderboardView() {
+function LeaderboardView({ leaderboardData, leaderboardLoading }) {
   const [tab, setTab] = useState("ALL");
   const filterTabs = ["ALL", "BTC", "ETH", "15M", "1H"];
-  const top3 = leaderboard.slice(0, 3);
-  const rest = leaderboard.slice(3);
+  
+  // Use fetched data or fallback to empty array
+  const displayData = leaderboardData || [];
+  const top3 = displayData.slice(0, 3);
+  const rest = displayData.slice(3);
+  
   // reorder for podium: 2nd, 1st, 3rd
-  const podiumOrder = [top3[1], top3[0], top3[2]];
+  const podiumOrder = [top3[1], top3[0], top3[2]].filter(Boolean);
   const podiumHeights = { 1: 110, 2: 80, 3: 68 };
   const medalColors = { 1: "#F4F6F8", 2: "#A8B0BC", 3: "#737B88" };
+
+  // Helper to get initials from username or wallet
+  const getInitials = (entry) => {
+    if (entry.username) return entry.username.slice(0, 2).toUpperCase();
+    return entry.wallet.slice(2, 4).toUpperCase();
+  };
+
+  if (leaderboardLoading && !leaderboardData) {
+    return (
+      <div className="container page" style={{ maxWidth: 580 }}>
+        <div className="text-center" style={{ marginBottom: 8 }}>
+          <h1 className="font-display" style={{ fontSize: 32, color: C.text, fontWeight: 700, fontStyle: "italic", letterSpacing: "-0.02em" }}>
+            Top Predictors
+          </h1>
+        </div>
+        <div className="skeleton" style={{ height: 300, borderRadius: 12 }} />
+      </div>
+    );
+  }
 
   return (
     <div className="container page" style={{ maxWidth: 580 }}>
@@ -1712,52 +2120,65 @@ function LeaderboardView() {
       </div>
 
       {/* Podium */}
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 16, marginBottom: 40 }}>
-        {podiumOrder.map((r) => (
-          <div key={r.rank} className="flex flex-col items-center" style={{ width: 120 }}>
-            <div className="font-display tnum" style={{ fontSize: 12, color: medalColors[r.rank], fontWeight: 700, marginBottom: 6 }}>
-              #{r.rank}
+      {podiumOrder.length > 0 && (
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: "clamp(8px, 3vw, 16px)", marginBottom: 40, flexWrap: "wrap" }} className="podium-container">
+          {podiumOrder.map((r) => (
+            <div key={r.rank} className="flex flex-col items-center" style={{ width: "clamp(80px, 25vw, 120px)" }}>
+              <div className="font-display tnum" style={{ fontSize: "clamp(10px, 2vw, 12px)", color: medalColors[r.rank], fontWeight: 700, marginBottom: 6 }}>
+                #{r.rank}
+              </div>
+              <Avatar initials={getInitials(r)} size={r.rank === 1 ? 54 : 44} />
+              <div className="font-display" style={{ fontSize: "clamp(12px, 2.5vw, 14px)", color: C.text, fontWeight: 700, margin: "8px 0 2px", textAlign: "center", wordBreak: "break-word" }}>{r.username || shortAddress(r.wallet)}</div>
+              <div className="font-body tnum" style={{ fontSize: "clamp(9px, 1.8vw, 11px)", color: C.muted, marginBottom: 10, textAlign: "center", whiteSpace: "nowrap" }}>{r.accuracy.toFixed(0)}% · {r.totalPredictions}</div>
+              <div
+                className="podium-bar"
+                style={{
+                  width: "100%",
+                  height: podiumHeights[r.rank],
+                  background: r.rank === 1
+                    ? `linear-gradient(to bottom, rgba(231,184,75,0.18), rgba(18,22,30,0.8))`
+                    : `linear-gradient(to bottom, rgba(255,255,255,0.06), rgba(13,16,22,0.8))`,
+                  border: `1px solid ${r.rank === 1 ? "rgba(231,184,75,0.25)" : "rgba(255,255,255,0.06)"}`,
+                  borderBottom: "none",
+                  boxShadow: r.rank === 1 ? "0 0 20px rgba(231,184,75,0.1)" : "none",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                <span className="font-display tnum" style={{ fontSize: "clamp(16px, 3vw, 20px)", fontWeight: 700, color: medalColors[r.rank] }}>{r.rank}</span>
+              </div>
             </div>
-            <Avatar initials={r.initials} size={r.rank === 1 ? 54 : 44} />
-            <div className="font-display" style={{ fontSize: r.rank === 1 ? 14 : 13, color: C.text, fontWeight: 700, margin: "8px 0 2px", textAlign: "center" }}>{r.name}</div>
-            <div className="font-body tnum" style={{ fontSize: 11, color: C.muted, marginBottom: 10, textAlign: "center" }}>{r.acc}% · {r.count} preds</div>
-            <div
-              className="podium-bar"
-              style={{
-                width: "100%",
-                height: podiumHeights[r.rank],
-                background: r.rank === 1
-                  ? `linear-gradient(to bottom, rgba(231,184,75,0.18), rgba(18,22,30,0.8))`
-                  : `linear-gradient(to bottom, rgba(255,255,255,0.06), rgba(13,16,22,0.8))`,
-                border: `1px solid ${r.rank === 1 ? "rgba(231,184,75,0.25)" : "rgba(255,255,255,0.06)"}`,
-                borderBottom: "none",
-                boxShadow: r.rank === 1 ? "0 0 20px rgba(231,184,75,0.1)" : "none",
-              }}
-            >
-              <span className="font-display tnum" style={{ fontSize: 20, fontWeight: 700, color: medalColors[r.rank] }}>{r.rank}</span>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+      
+      <style>{`
+        @media (max-width: 640px) {
+          .podium-container { margin-bottom: 30px; }
+        }
+      `}</style>
 
       {/* Rest of leaderboard */}
       <Panel pad={0}>
-        {rest.map((r, i) => (
-          <div
-            key={r.rank}
-            className="flex items-center justify-between hover-row"
-            style={{ padding: "16px 20px", borderTop: i === 0 ? "none" : `1px solid rgba(255,255,255,0.05)` }}
-          >
-            <div className="flex items-center gap-3.5">
-              <Avatar initials={r.initials} size={36} />
-              <span className="font-body" style={{ fontSize: 14.5, color: C.text, fontWeight: 600 }}>{r.name}</span>
+        {rest.length > 0 ? (
+          rest.map((r, i) => (
+            <div
+              key={r.wallet}
+              className="flex items-center justify-between hover-row"
+              style={{ padding: "16px 20px", borderTop: i === 0 ? "none" : `1px solid rgba(255,255,255,0.05)` }}
+            >
+              <div className="flex items-center gap-3.5">
+                <Avatar initials={getInitials(r)} size={36} />
+                <span className="font-body" style={{ fontSize: 14.5, color: C.text, fontWeight: 600 }}>{r.username || shortAddress(r.wallet)}</span>
+              </div>
+              <div className="text-right">
+                <div className="font-display tnum" style={{ fontSize: 15, color: C.text, fontWeight: 700 }}>{r.accuracy.toFixed(0)}%</div>
+                <div className="font-body tnum" style={{ fontSize: 10.5, color: C.muted }}>{r.totalPredictions} predictions</div>
+              </div>
             </div>
-            <div className="text-right">
-              <div className="font-display tnum" style={{ fontSize: 15, color: C.text, fontWeight: 700 }}>{r.acc}%</div>
-              <div className="font-body tnum" style={{ fontSize: 10.5, color: C.muted }}>{r.count} predictions</div>
-            </div>
-          </div>
-        ))}
+          ))
+        ) : (
+          <div className="font-body" style={{ fontSize: 12, color: C.faint, padding: "20px", textAlign: "center" }}>No leaderboard data available</div>
+        )}
       </Panel>
     </div>
   );
@@ -1809,10 +2230,10 @@ function PredictionReceipt({ item, onClose }) {
   if (!item) return null;
   const win = item.result === "win";
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(4,5,7,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20 }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(4,5,7,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: "16px", overflowY: "auto" }} onClick={onClose}>
       <div
         className="rise-in glass-card"
-        style={{ padding: 28, width: 320, position: "relative" }}
+        style={{ padding: "clamp(16px, 3vw, 28px)", width: "clamp(280px, 90vw, 360px)", maxWidth: "100%", position: "relative" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ position: "absolute", top: -24, right: -24, opacity: 0.04 }}><OracleLogo size={140} /></div>
@@ -1820,13 +2241,13 @@ function PredictionReceipt({ item, onClose }) {
         <div className="flex items-center justify-between" style={{ marginBottom: 22, position: "relative" }}>
           <div className="flex items-center gap-1.5">
             <OracleLogo size={14} color={C.muted} />
-            <span className="font-display" style={{ fontSize: 11, color: C.muted, fontWeight: 700, letterSpacing: "0.10em" }}>ORACLE</span>
+            <span className="font-display" style={{ fontSize: "clamp(10px, 1.8vw, 11px)", color: C.muted, fontWeight: 700, letterSpacing: "0.10em" }}>ORACLE</span>
           </div>
-          <button onClick={onClose} aria-label="Close receipt" style={{ background: "none", border: "none", cursor: "pointer", color: C.muted }}><XIcon size={16} /></button>
+          <button onClick={onClose} aria-label="Close receipt" style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, flexShrink: 0 }}><XIcon size={16} /></button>
         </div>
 
-        <div className="font-body" style={{ fontSize: 11.5, color: C.muted, marginBottom: 4 }}>MIDE PREDICTED</div>
-        <div className="font-display" style={{ fontSize: 22, color: C.text, fontWeight: 700, marginBottom: 16 }}>{item.market} 15M</div>
+        <div className="font-body" style={{ fontSize: "clamp(10px, 1.8vw, 11.5px)", color: C.muted, marginBottom: 4 }}>MIDE PREDICTED</div>
+        <div className="font-display" style={{ fontSize: "clamp(16px, 3vw, 22px)", color: C.text, fontWeight: 700, marginBottom: 16 }}>{item.market} 15M</div>
 
         <div className="flex items-center gap-3" style={{ marginBottom: 18 }}>
           <DirectionBadge dir={item.dir} />
@@ -1834,12 +2255,12 @@ function PredictionReceipt({ item, onClose }) {
         </div>
 
         <div style={{ borderTop: `1px solid rgba(255,255,255,0.07)`, paddingTop: 16, marginBottom: 20 }}>
-          <span className="font-display flex items-center gap-2" style={{ fontSize: 13, fontWeight: 700, color: win ? C.up : C.down, letterSpacing: "0.04em" }}>
+          <span className="font-display flex items-center gap-2" style={{ fontSize: "clamp(12px, 2vw, 13px)", fontWeight: 700, color: win ? C.up : C.down, letterSpacing: "0.04em" }}>
             {win ? <><Check size={16} strokeWidth={2.5} /> CORRECT</> : <><XIcon size={16} strokeWidth={2.5} /> INCORRECT</>}
           </span>
         </div>
 
-        <Button variant="ghost" full onClick={() => {}}>
+        <Button variant="ghost" full onClick={() => {}} style={{ minHeight: 44 }}>
           <span className="flex items-center justify-center gap-2"><Share2 size={13} /> Share Receipt</span>
         </Button>
       </div>
@@ -1855,29 +2276,29 @@ function TradeModal({ order, onClose, status, onConfirm, onRetry }) {
   const payout = (amount * (100 / price)).toFixed(2);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(4,5,7,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20 }} onClick={status === "pending" ? undefined : onClose}>
-      <div className="rise-in glass-card" style={{ padding: 26, width: 340 }} onClick={(e) => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(4,5,7,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: "16px", overflowY: "auto" }} onClick={status === "pending" ? undefined : onClose}>
+      <div className="rise-in glass-card" style={{ padding: "clamp(16px, 3vw, 26px)", width: "clamp(280px, 90vw, 380px)", maxWidth: "100%" }} onClick={(e) => e.stopPropagation()}>
         {status === "confirm" && (
           <>
             <div className="font-body" style={{ fontSize: 11, color: C.muted, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.08em" }}>Execute Trade</div>
-            <div className="font-display" style={{ fontSize: 18, color: C.text, fontWeight: 700, marginBottom: 20 }}>{order.market}</div>
+            <div className="font-display" style={{ fontSize: "clamp(14px, 3vw, 18px)", color: C.text, fontWeight: 700, marginBottom: 20 }}>{order.market}</div>
             <div className="flex flex-col" style={{ gap: 13, marginBottom: 22 }}>
-              <div className="flex items-center justify-between"><span className="font-body" style={{ fontSize: 12.5, color: C.muted }}>Side</span><DirectionBadge dir={order.dir} /></div>
-              <div className="flex items-center justify-between"><span className="font-body" style={{ fontSize: 12.5, color: C.muted }}>Price</span><PriceDisplay value={price} size={14} /></div>
-              <div className="flex items-center justify-between"><span className="font-body" style={{ fontSize: 12.5, color: C.muted }}>Amount</span><span className="font-display tnum" style={{ fontSize: 14, color: C.text, fontWeight: 700 }}>${amount}</span></div>
+              <div className="flex items-center justify-between"><span className="font-body" style={{ fontSize: "clamp(11px, 2vw, 12.5px)", color: C.muted }}>Side</span><DirectionBadge dir={order.dir} /></div>
+              <div className="flex items-center justify-between"><span className="font-body" style={{ fontSize: "clamp(11px, 2vw, 12.5px)", color: C.muted }}>Price</span><PriceDisplay value={price} size={14} /></div>
+              <div className="flex items-center justify-between"><span className="font-body" style={{ fontSize: "clamp(11px, 2vw, 12.5px)", color: C.muted }}>Amount</span><span className="font-display tnum" style={{ fontSize: "clamp(12px, 2vw, 14px)", color: C.text, fontWeight: 700 }}>${amount}</span></div>
               <div className="flex items-center justify-between" style={{ borderTop: `1px solid rgba(255,255,255,0.07)`, paddingTop: 13 }}>
-                <span className="font-body" style={{ fontSize: 12.5, color: C.muted }}>Potential payout</span>
-                <span className="font-display tnum" style={{ fontSize: 14, color: C.gold, fontWeight: 700 }}>${payout}</span>
+                <span className="font-body" style={{ fontSize: "clamp(11px, 2vw, 12.5px)", color: C.muted }}>Potential payout</span>
+                <span className="font-display tnum" style={{ fontSize: "clamp(12px, 2vw, 14px)", color: C.gold, fontWeight: 700 }}>${payout}</span>
               </div>
             </div>
-            <Button variant={up ? "up" : "down"} full glow onClick={onConfirm} style={{ borderRadius: 12, fontSize: 14 }}>Confirm Trade</Button>
+            <Button variant={up ? "up" : "down"} full glow onClick={onConfirm} style={{ borderRadius: 12, fontSize: "clamp(12px, 2vw, 14px)", minHeight: 44 }}>Confirm Trade</Button>
           </>
         )}
 
         {status === "pending" && (
           <div className="text-center" style={{ padding: "18px 0" }}>
             <div className="spin" style={{ width: 30, height: 30, border: `2px solid rgba(255,255,255,0.08)`, borderTopColor: C.up, borderRadius: 999, margin: "0 auto 16px" }} />
-            <div className="font-body" style={{ fontSize: 13, color: C.muted }}>Submitting to DreamDEX…</div>
+            <div className="font-body" style={{ fontSize: "clamp(12px, 2vw, 13px)", color: C.muted }}>Submitting to DreamDEX…</div>
           </div>
         )}
 
@@ -1886,10 +2307,10 @@ function TradeModal({ order, onClose, status, onConfirm, onRetry }) {
             <div style={{ width: 52, height: 52, borderRadius: 999, background: C.upSoft, border: `1px solid ${C.upBorder}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: `0 0 20px rgba(32,229,138,0.25)` }}>
               <Check size={22} color={C.up} strokeWidth={2.5} />
             </div>
-            <div className="font-display" style={{ fontSize: 16, color: C.text, fontWeight: 700, marginBottom: 6 }}>Position Confirmed</div>
-            <div className="font-body tnum" style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>${amount} on {order.dir} · {order.market}</div>
-            <div className="font-body" style={{ fontSize: 11, color: C.faint, marginBottom: 20 }}>DreamDEX order submitted</div>
-            <Button variant="ghost" full onClick={onClose}>Close</Button>
+            <div className="font-display" style={{ fontSize: "clamp(14px, 2.5vw, 16px)", color: C.text, fontWeight: 700, marginBottom: 6 }}>Position Confirmed</div>
+            <div className="font-body tnum" style={{ fontSize: "clamp(11px, 1.8vw, 12px)", color: C.muted, marginBottom: 4 }}>${amount} on {order.dir} · {order.market}</div>
+            <div className="font-body" style={{ fontSize: "clamp(10px, 1.8vw, 11px)", color: C.faint, marginBottom: 20 }}>DreamDEX order submitted</div>
+            <Button variant="ghost" full onClick={onClose} style={{ minHeight: 44 }}>Close</Button>
           </div>
         )}
 
@@ -1898,9 +2319,9 @@ function TradeModal({ order, onClose, status, onConfirm, onRetry }) {
             <div style={{ width: 52, height: 52, borderRadius: 999, background: C.downSoft, border: `1px solid ${C.downBorder}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
               <XIcon size={22} color={C.down} strokeWidth={2.5} />
             </div>
-            <div className="font-display" style={{ fontSize: 15, color: C.text, fontWeight: 700, marginBottom: 6 }}>Trade Couldn't Be Completed</div>
-            <div className="font-body" style={{ fontSize: 12, color: C.muted, marginBottom: 20 }}>Your position was not submitted.</div>
-            <Button variant="ghost" full onClick={onRetry}>Try Again</Button>
+            <div className="font-display" style={{ fontSize: "clamp(14px, 2.5vw, 15px)", color: C.text, fontWeight: 700, marginBottom: 6 }}>Trade Couldn't Be Completed</div>
+            <div className="font-body" style={{ fontSize: "clamp(11px, 2vw, 12px)", color: C.muted, marginBottom: 20 }}>Your position was not submitted.</div>
+            <Button variant="ghost" full onClick={onRetry} style={{ minHeight: 44 }}>Try Again</Button>
           </div>
         )}
       </div>
@@ -1971,21 +2392,21 @@ function WalletModal({ onConnect, onClose }) {
 
   return (
     <div
-      style={{ position: "fixed", inset: 0, background: "rgba(4,5,7,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }}
+      style={{ position: "fixed", inset: 0, background: "rgba(4,5,7,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: "16px", overflowY: "auto" }}
       onClick={onClose}
     >
       <div
         className="rise-in glass-card"
-        style={{ padding: 28, width: 360, position: "relative" }}
+        style={{ padding: "clamp(16px, 3vw, 28px)", width: "clamp(280px, 90vw, 400px)", maxWidth: "100%", position: "relative" }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
           <div>
-            <div className="font-display" style={{ fontSize: 18, color: C.text, fontWeight: 700 }}>Connect Wallet</div>
-            <div className="font-body" style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>Choose your wallet to continue</div>
+            <div className="font-display" style={{ fontSize: "clamp(14px, 3vw, 18px)", color: C.text, fontWeight: 700 }}>Connect Wallet</div>
+            <div className="font-body" style={{ fontSize: "clamp(11px, 2vw, 12px)", color: C.muted, marginTop: 3 }}>Choose your wallet to continue</div>
           </div>
-          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4 }}>
+          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4, flexShrink: 0 }}>
             <XIcon size={18} />
           </button>
         </div>
@@ -1998,7 +2419,7 @@ function WalletModal({ onConnect, onClose }) {
               onClick={() => onConnect(w.id)}
               className="flex items-center gap-3 btn"
               style={{
-                width: "100%", padding: "14px 16px", borderRadius: 14, cursor: "pointer",
+                width: "100%", padding: "14px 16px", borderRadius: 14, cursor: "pointer", minHeight: 52,
                 background: "rgba(255,255,255,0.04)",
                 border: "1px solid rgba(255,255,255,0.09)",
                 textAlign: "left",
@@ -2008,17 +2429,17 @@ function WalletModal({ onConnect, onClose }) {
               onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.09)"; }}
             >
               {w.icon}
-              <div style={{ flex: 1 }}>
-                <div className="font-body" style={{ fontSize: 14, color: C.text, fontWeight: 700 }}>{w.name}</div>
-                <div className="font-body" style={{ fontSize: 11.5, color: C.muted, marginTop: 1 }}>{w.desc}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="font-body" style={{ fontSize: "clamp(12px, 2vw, 14px)", color: C.text, fontWeight: 700 }}>{w.name}</div>
+                <div className="font-body" style={{ fontSize: "clamp(10px, 1.8vw, 11.5px)", color: C.muted, marginTop: 1 }}>{w.desc}</div>
               </div>
               {w.installed && (
-                <span style={{ fontSize: 10, fontWeight: 700, color: C.up, background: "rgba(32,229,138,0.1)", border: "1px solid rgba(32,229,138,0.25)", padding: "2px 7px", borderRadius: 999, letterSpacing: "0.06em" }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: C.up, background: "rgba(32,229,138,0.1)", border: "1px solid rgba(32,229,138,0.25)", padding: "2px 6px", borderRadius: 999, letterSpacing: "0.06em", whiteSpace: "nowrap" }}>
                   INSTALLED
                 </span>
               )}
               {!w.installed && (
-                <span style={{ fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: "0.04em" }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: "0.04em", whiteSpace: "nowrap" }}>
                   Get →
                 </span>
               )}
@@ -2026,9 +2447,64 @@ function WalletModal({ onConnect, onClose }) {
           ))}
         </div>
 
-        <p className="font-body" style={{ fontSize: 11, color: C.faint, textAlign: "center", marginTop: 20, lineHeight: 1.6 }}>
+        <p className="font-body" style={{ fontSize: "clamp(10px, 1.8vw, 11px)", color: C.faint, textAlign: "center", marginTop: 20, lineHeight: 1.6 }}>
           By connecting, you agree to trade on DreamDEX Event Contracts.<br/>No custody - your keys, your wallet.
         </p>
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────── Onboarding ──────────────────── */
+
+function OnboardingScreen({ wallet, connectWallet, onContinue, onSkip }) {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: C.bg }}>
+      <div className="rise-in glass-card" style={{ padding: "clamp(28px, 5vw, 44px) clamp(24px, 4vw, 36px)", width: "clamp(280px, 92vw, 420px)", maxWidth: "100%", textAlign: "center" }}>
+        <div className="flex items-center justify-center gap-2" style={{ marginBottom: 22 }}>
+          <OracleLogo size={26} color={C.text} />
+          <span className="font-display" style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.01em", color: C.text }}>ORACLE</span>
+        </div>
+
+        {!wallet ? (
+          <>
+            <div className="font-display" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.text, letterSpacing: "-0.02em", marginBottom: 10 }}>
+              Connect your wallet
+            </div>
+            <p className="font-body" style={{ fontSize: 13.5, color: C.muted, lineHeight: 1.65, marginBottom: 28 }}>
+              Oracle is non-custodial — every prediction you back is a real DreamDEX Event Contract order signed by your own wallet. Connect now, or browse first and connect later.
+            </p>
+            <Button variant="up" full glow onClick={connectWallet} ariaLabel="Connect wallet">
+              <span className="flex items-center justify-center gap-2"><Wallet size={14} /> Connect Wallet</span>
+            </Button>
+            <button
+              onClick={onSkip}
+              className="font-body link-btn"
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12.5, color: C.muted, marginTop: 18, padding: 6 }}
+            >
+              Continue without a wallet
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={{
+              width: 52, height: 52, borderRadius: "50%", margin: "0 auto 18px",
+              background: "rgba(32,229,138,0.12)", border: "1px solid rgba(32,229,138,0.3)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Check size={24} color={C.up} strokeWidth={2.5} />
+            </div>
+            <div className="font-display" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.text, letterSpacing: "-0.02em", marginBottom: 8 }}>
+              You're connected
+            </div>
+            <p className="font-body tnum" style={{ fontSize: 13.5, color: C.muted, marginBottom: 28 }}>
+              {wallet}
+            </p>
+            <Button variant="up" full glow onClick={onContinue} ariaLabel="Continue to dashboard">
+              <span className="flex items-center justify-center gap-2">Continue to Dashboard <ArrowUpRight size={14} /></span>
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -2037,6 +2513,9 @@ function WalletModal({ onConnect, onClose }) {
 /* ──────────────────── Dashboard root ──────────────────── */
 
 export default function OracleDashboard({ onExit }) {
+  const [onboarded, setOnboarded] = useState(() => {
+    try { return localStorage.getItem("oracle_onboarded") === "1"; } catch { return false; }
+  });
   const [view, setView] = useState("feed");
   const [detail, setDetail] = useState(null);
   const [wallet, setWallet] = useState(null);
@@ -2134,7 +2613,62 @@ export default function OracleDashboard({ onExit }) {
     return () => { cancelled = true; clearInterval(interval); };
   }, [walletAddress]);
 
+  // Fetch leaderboard data from API
+  const [leaderboardData, setLeaderboardData] = useState(null);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [userProfileData, setUserProfileData] = useState(null);
+  const [userProfileLoading, setUserProfileLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      setLeaderboardLoading(true);
+      try {
+        const data = await getLeaderboard({ limit: 10 });
+        setLeaderboardData(data);
+      } catch (error) {
+        console.error("Failed to fetch leaderboard:", error);
+        setLeaderboardData(null);
+      } finally {
+        setLeaderboardLoading(false);
+      }
+    };
+
+    fetchLeaderboard();
+    const interval = setInterval(fetchLeaderboard, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch user profile when wallet is connected
+  useEffect(() => {
+    if (!walletAddress) {
+      setUserProfileData(null);
+      return;
+    }
+
+    const fetchUserProfile = async () => {
+      setUserProfileLoading(true);
+      try {
+        const data = await getUserProfile(walletAddress);
+        setUserProfileData(data);
+      } catch (error) {
+        console.error("Failed to fetch user profile:", error);
+        setUserProfileData(null);
+      } finally {
+        setUserProfileLoading(false);
+      }
+    };
+
+    fetchUserProfile();
+    const interval = setInterval(fetchUserProfile, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, [walletAddress]);
+
   const connectWallet = () => setWalletModalOpen(true);
+
+  const finishOnboarding = () => {
+    setOnboarded(true);
+    try { localStorage.setItem("oracle_onboarded", "1"); } catch { /* private browsing — non-fatal */ }
+  };
 
   const handleWalletConnect = async (type) => {
     try {
@@ -2181,9 +2715,26 @@ export default function OracleDashboard({ onExit }) {
   const openProfile = () => setView("profile");
   const openOrder = (o) => { setOrder(o); setOrderStatus("confirm"); };
 
-  const confirmOrder = () => {
+  const confirmOrder = async () => {
     setOrderStatus("pending");
-    setTimeout(() => setOrderStatus(Math.random() < 0.12 ? "error" : "done"), 1100);
+    try {
+      // Only send to API if wallet is connected
+      if (walletAddress && order) {
+        await createPrediction({
+          wallet: walletAddress,
+          marketId: order.market || `${order.asset}-${order.dir}`,
+          asset: order.asset || "BTC",
+          duration: order.duration || "15M",
+          prediction: order.dir || "UP",
+          entryPrice: order.price ? order.price / 100 : 0.5, // Normalize to 0-1 range
+          username: wallet ? wallet : undefined,
+        });
+      }
+      setTimeout(() => setOrderStatus("done"), 1100);
+    } catch (error) {
+      console.error("Failed to record prediction:", error);
+      setOrderStatus("error");
+    }
   };
   const retryOrder = () => confirmOrder();
 
@@ -2247,6 +2798,16 @@ export default function OracleDashboard({ onExit }) {
   const bgImage = "/spheres-bg.png";
   const bgClass = "bg-drift-alt";
 
+  if (!onboarded) {
+    return (
+      <div className="orc-root font-body">
+        <GlobalStyles />
+        <OnboardingScreen wallet={wallet} connectWallet={connectWallet} onContinue={finishOnboarding} onSkip={finishOnboarding} />
+        {walletModalOpen && <WalletModal onConnect={handleWalletConnect} onClose={() => setWalletModalOpen(false)} />}
+      </div>
+    );
+  }
+
   return (
     <div className="orc-root font-body" style={{ background: C.bg, minHeight: "100vh", color: C.text, position: "relative" }}>
       <GlobalStyles />
@@ -2277,7 +2838,7 @@ export default function OracleDashboard({ onExit }) {
         }} />
       </div>
 
-      <div style={{ position: "relative", zIndex: 1 }}>
+      <div className="app-shell-content" style={{ position: "relative", zIndex: 1 }}>
         <Nav
           view={view}
           setView={(v) => { setView(v); setDetail(null); }}
@@ -2292,8 +2853,15 @@ export default function OracleDashboard({ onExit }) {
         {view === "market" && <MarketView market={detail || marketFocus} onBack={openOrder} />}
         {view === "predict" && <PredictView marketOptions={marketOptions} onSubmit={openOrder} wallet={wallet} connectWallet={connectWallet} />}
         {view === "detail" && detail && <PredictionDetailView p={detail} onOpenMarket={openMarket} onOpenProfile={openProfile} onBack={openOrder} />}
-        {view === "profile" && <ProfileView onOpenReceipt={setReceipt} />}
-        {view === "leaderboard" && <LeaderboardView />}
+        {view === "profile" && (
+          <ProfileView
+            profile={userProfileData}
+            profileLoading={userProfileLoading}
+            walletAddress={walletAddress}
+            onOpenReceipt={setReceipt}
+          />
+        )}
+        {view === "leaderboard" && <LeaderboardView leaderboardData={leaderboardData} leaderboardLoading={leaderboardLoading} />}
         {view === "battle" && <BattleView onBack={openOrder} />}
       </div>
 
