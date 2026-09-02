@@ -13,6 +13,7 @@
     "test:integration": "npm run test:integration --workspace=@signal/oracle-backend",
     "db:generate": "npm run db:generate --workspace=@signal/oracle-backend",
     "db:migrate": "npm run db:migrate --workspace=@signal/oracle-backend",
-    "db:seed": "npm run db:seed --workspace=@signal/oracle-backend"
+    "db:seed": "npm run db:seed --workspace=@signal/oracle-backend",
+    "smoke": "npm run smoke --workspace=@signal/oracle-backend"
   }
 }

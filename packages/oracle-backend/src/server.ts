@@ -15,6 +15,7 @@ import { tradeRoutes } from './modules/trades/routes.js';
 import { userRoutes } from './modules/users/routes.js';
 import { leaderboardRoutes } from './modules/leaderboard/routes.js';
 import { battleRoutes } from './modules/battles/routes.js';
+import { compatRoutes } from './modules/compat/routes.js';
 import { realtimeRoutes } from './realtime/routes.js';
 
 /** Narrowing helper: Fastify types the handler's error as unknown-ish. */
@@ -130,6 +131,40 @@ export async function buildServer(): Promise<FastifyInstance> {
       await battleRoutes(api);
     },
     { prefix: '/api/v1' },
+  );
+
+  /**
+   * The retired oracle-analytics contract, for the existing frontend.
+   *
+   * Registered as its own plugin so its error shape can differ: that client
+   * reads `error.message` at the top level, while /api/v1 nests it under
+   * `error`. Sending both keeps either reader working.
+   */
+  await app.register(
+    async (compat) => {
+      compat.setErrorHandler((error, req, reply) => {
+        const err = error as Error & { statusCode?: number; code?: string };
+        const status = error instanceof AppError ? error.statusCode : (err.statusCode ?? 500);
+        const message =
+          error instanceof AppError
+            ? error.message
+            : isZodError(error)
+              ? error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ')
+              : status >= 500
+                ? 'Internal server error'
+                : err.message;
+
+        if (status >= 500) req.log.error({ err: error }, 'Unhandled error on the compat API');
+
+        return reply.code(isZodError(error) ? 400 : status).send({
+          message,
+          error: { code: error instanceof AppError ? error.code : 'ERROR', message },
+        });
+      });
+
+      await compatRoutes(compat);
+    },
+    { prefix: '/api' },
   );
 
   await app.register(realtimeRoutes);
