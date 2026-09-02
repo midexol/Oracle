@@ -9,3 +9,6 @@ coverage/
 # Local test databases
 *.db-journal
 .vitest/
+
+# Local embedded Postgres data dir (see .dev-data/boot-pg.mjs)
+.dev-data/
