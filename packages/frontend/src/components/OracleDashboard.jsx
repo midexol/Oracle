@@ -481,18 +481,8 @@ const GlobalStyles = () => (
         border-radius: 12px;
         margin-bottom: 16px;
       }
-      .orc-root .profile-hero .flex {
-        flex-direction: column;
-        gap: 12px;
-      }
       .orc-root .profile-hero .text-right { text-align: left; }
-      
-      /* Stats grid on profile */
-      .orc-root .profile-hero > [style*="grid"] {
-        grid-template-columns: 1fr !important;
-        gap: 12px;
-      }
-      
+
       /* Leaderboard */
       .orc-root .podium-bar { min-height: 60px; }
       .orc-root .avatar { margin: 0 auto; }
@@ -1943,9 +1933,12 @@ function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt }) 
       
       <style>{`
         @media (max-width: 640px) {
-          .profile-stats-grid {
+          .orc-root .profile-hero .profile-stats-grid {
             grid-template-columns: 1fr 1fr !important;
             gap: 16px !important;
+          }
+          .orc-root .container .profile-stats-tab-grid {
+            grid-template-columns: 1fr 1fr !important;
           }
         }
       `}</style>
@@ -2046,7 +2039,7 @@ function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt }) 
       )}
 
       {activeTab === "stats" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="profile-stats-tab-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {[
             { label: "Win Rate", value: view.accuracy + "%", accent: C.up },
             { label: "Total Preds", value: view.count, accent: C.text },
