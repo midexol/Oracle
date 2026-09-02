@@ -131,6 +131,15 @@ analyticsRouter.get(
           accuracy: c.accuracy,
           categoryScore: c.categoryScore,
         })),
+        history: user.predictions.map((p) => ({
+          id: p.id,
+          market: `${p.asset} ${p.duration}`,
+          asset: p.asset,
+          dir: p.prediction,
+          result: p.result,
+          price: p.entryPrice,
+          resolvedAt: p.resolvedAt ? p.resolvedAt.toISOString() : null,
+        })),
       },
     });
   }),
