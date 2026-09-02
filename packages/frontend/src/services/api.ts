@@ -3,7 +3,7 @@
  * Handles all communication with @signal/oracle-analytics backend
  */
 
-const API_BASE = "http://localhost:4000/api";
+const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api";
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -26,7 +26,9 @@ async function apiFetch(endpoint: string, options?: RequestInit) {
     throw new ApiError(response.status, error.message || response.statusText);
   }
 
-  return response.json();
+  // Every oracle-analytics route wraps its payload as `{ data: ... }`.
+  const body = await response.json();
+  return body.data;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -59,20 +61,44 @@ export async function getPredictionContext(predictionId: string) {
 // Users & Profiles
 // ─────────────────────────────────────────────────────────────
 
+export interface ProfileHistoryEntry {
+  id: string;
+  market: string;
+  asset: string;
+  dir: "UP" | "DOWN";
+  result: "WON" | "LOST";
+  price: number;
+  resolvedAt: string | null;
+}
+
+export interface ProfileCategoryStat {
+  label: string;
+  asset: string;
+  duration: string;
+  totalPredictions: number;
+  totalWins: number;
+  accuracy: number;
+  categoryScore: number;
+}
+
+// Field names match `oracle-analytics`'s actual /users/:wallet/profile
+// response (see packages/oracle-analytics/src/routes/analytics.ts) — this
+// previously drifted from the real shape (score/winRate/momentum vs. the
+// real predictionScore/winRate/momentumScore etc.), so nothing that read it
+// ever saw real values.
 export interface UserProfile {
   wallet: string;
   username?: string;
   avatar?: string;
   totalPredictions: number;
+  totalWins: number;
+  totalLosses: number;
   winRate: number;
-  score: number;
-  momentum: number;
-  credibleInterval: { lower: number; upper: number };
-  categoryBreakdown: Array<{
-    category: string;
-    winRate: number;
-    count: number;
-  }>;
+  predictionScore: number;
+  momentumScore: number;
+  credibleInterval90: { lower: number; upper: number };
+  categoryBreakdown: ProfileCategoryStat[];
+  history: ProfileHistoryEntry[];
 }
 
 export async function getUserProfile(wallet: string): Promise<UserProfile> {
@@ -87,22 +113,29 @@ export async function getScoreBreakdown(wallet: string) {
 // Leaderboard
 // ─────────────────────────────────────────────────────────────
 
+// Field names match `oracle-analytics`'s actual GET /leaderboard response
+// (see packages/oracle-analytics/src/routes/analytics.ts) — this previously
+// declared score/winRate/predictionsCount/momentum/specialties, none of
+// which the backend returns, so LeaderboardView crashed on real data
+// (`r.winRate.toFixed` on undefined).
 export interface LeaderboardEntry {
   rank: number;
   wallet: string;
   username: string;
   avatar: string;
-  score: number;
-  winRate: number;
-  predictionsCount: number;
-  momentum?: number;
-  specialties?: Array<{ market: string; winRate: number }>;
+  asset?: string;
+  duration?: string;
+  totalPredictions: number;
+  totalWins: number;
+  totalLosses?: number;
+  accuracy: number;
+  predictionScore: number;
 }
 
 export interface LeaderboardParams {
   asset?: string;
   duration?: string;
-  sortBy?: "score" | "winRate" | "momentum";
+  sortBy?: "prediction_score" | "accuracy";
   limit?: number;
 }
 

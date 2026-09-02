@@ -1732,9 +1732,38 @@ function PredictionDetailView({ p, onOpenMarket, onOpenProfile, onBack }) {
 
 /* ──────────────────── Profile page ──────────────────── */
 
-function ProfileView({ onOpenReceipt }) {
+function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt }) {
   const [activeTab, setActiveTab] = useState("history");
   const tabs = ["history", "specialties", "stats"];
+
+  const hasRealProfile = Boolean(walletAddress && profile);
+
+  const view = hasRealProfile
+    ? {
+        name: profile.username || shortAddress(profile.wallet),
+        initials: profile.username ? profile.username.slice(0, 2).toUpperCase() : profile.wallet.slice(2, 4).toUpperCase(),
+        joined: null,
+        score: Math.round(profile.predictionScore),
+        accuracy: Math.round(profile.winRate),
+        count: profile.totalPredictions,
+        correct: profile.totalWins,
+        specialties: profile.categoryBreakdown.map((c) => ({ market: c.label, acc: Math.round(c.accuracy) })),
+        history: profile.history.map((h) => ({
+          market: h.market,
+          dir: h.dir,
+          price: h.price,
+          result: h.result === "WON" ? "win" : "loss",
+        })),
+      }
+    : { ...predictor, initials: "MD" };
+
+  if (walletAddress && profileLoading && !profile) {
+    return (
+      <div className="container page" style={{ maxWidth: 640 }}>
+        <div className="skeleton" style={{ height: 300, borderRadius: 12 }} />
+      </div>
+    );
+  }
 
   return (
     <div className="container page" style={{ maxWidth: 640 }}>
@@ -1744,7 +1773,7 @@ function ProfileView({ onOpenReceipt }) {
         <div className="flex items-start justify-between" style={{ marginBottom: 20, gap: 16, flexWrap: "wrap" }}>
           <div className="flex items-center gap-4" style={{ flexWrap: "wrap" }}>
             <div style={{ position: "relative" }}>
-              <Avatar initials="MD" size={64} live />
+              <Avatar initials={view.initials} size={64} live />
               <div style={{
                 position: "absolute", inset: -3, borderRadius: 999,
                 border: "1.5px solid rgba(32,229,138,0.3)",
@@ -1752,15 +1781,15 @@ function ProfileView({ onOpenReceipt }) {
               }} />
             </div>
             <div style={{ minWidth: 0 }}>
-              <div className="font-display" style={{ fontSize: "clamp(18px, 4vw, 24px)", color: C.text, fontWeight: 700, letterSpacing: "-0.03em", marginBottom: 2 }}>Mide</div>
-              <div className="font-body" style={{ fontSize: "clamp(10px, 2vw, 11.5px)", color: C.muted }}>Predictor since {predictor.joined}</div>
+              <div className="font-display" style={{ fontSize: "clamp(18px, 4vw, 24px)", color: C.text, fontWeight: 700, letterSpacing: "-0.03em", marginBottom: 2 }}>{view.name}</div>
+              {view.joined && <div className="font-body" style={{ fontSize: "clamp(10px, 2vw, 11.5px)", color: C.muted }}>Predictor since {view.joined}</div>}
               <div className="flex items-center gap-2" style={{ marginTop: 6 }}>
                 <span style={{
                   fontSize: 10, fontWeight: 700, letterSpacing: "0.1em",
                   color: C.text, background: "rgba(255,255,255,0.08)",
                   border: "1px solid rgba(255,255,255,0.16)",
                   padding: "2px 8px", borderRadius: 999,
-                }}>{scoreTier(predictor.score)}</span>
+                }}>{scoreTier(view.score)}</span>
               </div>
             </div>
           </div>
@@ -1777,19 +1806,19 @@ function ProfileView({ onOpenReceipt }) {
         {/* Score gauge + stats — responsive grid */}
         <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr", gap: 24, alignItems: "center", gridAutoFlow: "dense" }} className="profile-stats-grid">
           <div className="flex flex-col items-center gap-1">
-            <ScoreGauge score={predictor.score} size={80} />
+            <ScoreGauge score={view.score} size={80} />
             <div className="font-body" style={{ fontSize: 10, color: C.muted, fontWeight: 700, letterSpacing: "0.08em" }}>ORACLE SCORE</div>
           </div>
           <div className="text-center">
-            <div className="font-display tnum" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.text, letterSpacing: "-0.03em" }}>{predictor.accuracy}%</div>
+            <div className="font-display tnum" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.text, letterSpacing: "-0.03em" }}>{view.accuracy}%</div>
             <div className="font-body" style={{ fontSize: "clamp(9px, 1.8vw, 10.5px)", color: C.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Accuracy</div>
           </div>
           <div className="text-center">
-            <div className="font-display tnum" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.text, letterSpacing: "-0.03em" }}>{predictor.count}</div>
+            <div className="font-display tnum" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.text, letterSpacing: "-0.03em" }}>{view.count}</div>
             <div className="font-body" style={{ fontSize: "clamp(9px, 1.8vw, 10.5px)", color: C.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Predictions</div>
           </div>
           <div className="text-center">
-            <div className="font-display tnum" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.up, letterSpacing: "-0.03em" }}>{predictor.correct}</div>
+            <div className="font-display tnum" style={{ fontSize: "clamp(20px, 4vw, 26px)", fontWeight: 700, color: C.up, letterSpacing: "-0.03em" }}>{view.correct}</div>
             <div className="font-body" style={{ fontSize: "clamp(9px, 1.8vw, 10.5px)", color: C.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Correct</div>
           </div>
         </div>
@@ -1831,7 +1860,10 @@ function ProfileView({ onOpenReceipt }) {
           <div style={{ padding: "16px 18px 6px" }}>
             <SectionLabel>Prediction History</SectionLabel>
           </div>
-          {predictor.history.map((h, i) => {
+          {view.history.length === 0 && (
+            <div className="font-body" style={{ fontSize: 12, color: C.faint, padding: "20px", textAlign: "center" }}>No predictions yet</div>
+          )}
+          {view.history.map((h, i) => {
             const win = h.result === "win";
             return (
               <button
@@ -1877,8 +1909,11 @@ function ProfileView({ onOpenReceipt }) {
       {activeTab === "specialties" && (
         <Panel pad={20}>
           <SectionLabel>Market Specialties</SectionLabel>
+          {view.specialties.length === 0 && (
+            <div className="font-body" style={{ fontSize: 12, color: C.faint, textAlign: "center" }}>No category data yet</div>
+          )}
           <div className="flex flex-col" style={{ gap: 18 }}>
-            {predictor.specialties.map((s, i) => (
+            {view.specialties.map((s, i) => (
               <div key={i}>
                 <div className="flex justify-between font-body" style={{ fontSize: 13.5, color: C.text, marginBottom: 8 }}>
                   <span style={{ fontWeight: 600 }}>{s.market}</span>
@@ -1896,10 +1931,10 @@ function ProfileView({ onOpenReceipt }) {
       {activeTab === "stats" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {[
-            { label: "Win Rate", value: predictor.accuracy + "%", accent: C.up },
-            { label: "Total Preds", value: predictor.count, accent: C.text },
-            { label: "Correct", value: predictor.correct, accent: C.up },
-            { label: "Oracle Score", value: predictor.score, accent: C.gold },
+            { label: "Win Rate", value: view.accuracy + "%", accent: C.up },
+            { label: "Total Preds", value: view.count, accent: C.text },
+            { label: "Correct", value: view.correct, accent: C.up },
+            { label: "Oracle Score", value: view.score, accent: C.gold },
           ].map((s, i) => (
             <Panel key={i} pad={20}>
               <div className="font-display tnum" style={{ fontSize: 30, fontWeight: 700, color: s.accent, letterSpacing: "-0.03em", marginBottom: 4 }}>{s.value}</div>
@@ -1984,7 +2019,7 @@ function LeaderboardView({ leaderboardData, leaderboardLoading }) {
               </div>
               <Avatar initials={getInitials(r)} size={r.rank === 1 ? 54 : 44} />
               <div className="font-display" style={{ fontSize: "clamp(12px, 2.5vw, 14px)", color: C.text, fontWeight: 700, margin: "8px 0 2px", textAlign: "center", wordBreak: "break-word" }}>{r.username || shortAddress(r.wallet)}</div>
-              <div className="font-body tnum" style={{ fontSize: "clamp(9px, 1.8vw, 11px)", color: C.muted, marginBottom: 10, textAlign: "center", whiteSpace: "nowrap" }}>{r.winRate.toFixed(0)}% · {r.predictionsCount}</div>
+              <div className="font-body tnum" style={{ fontSize: "clamp(9px, 1.8vw, 11px)", color: C.muted, marginBottom: 10, textAlign: "center", whiteSpace: "nowrap" }}>{r.accuracy.toFixed(0)}% · {r.totalPredictions}</div>
               <div
                 className="podium-bar"
                 style={{
@@ -2026,8 +2061,8 @@ function LeaderboardView({ leaderboardData, leaderboardLoading }) {
                 <span className="font-body" style={{ fontSize: 14.5, color: C.text, fontWeight: 600 }}>{r.username || shortAddress(r.wallet)}</span>
               </div>
               <div className="text-right">
-                <div className="font-display tnum" style={{ fontSize: 15, color: C.text, fontWeight: 700 }}>{r.winRate.toFixed(0)}%</div>
-                <div className="font-body tnum" style={{ fontSize: 10.5, color: C.muted }}>{r.predictionsCount} predictions</div>
+                <div className="font-display tnum" style={{ fontSize: 15, color: C.text, fontWeight: 700 }}>{r.accuracy.toFixed(0)}%</div>
+                <div className="font-body tnum" style={{ fontSize: 10.5, color: C.muted }}>{r.totalPredictions} predictions</div>
               </div>
             </div>
           ))
@@ -2635,7 +2670,14 @@ export default function OracleDashboard({ onExit }) {
         {view === "market" && <MarketView market={detail || marketFocus} onBack={openOrder} />}
         {view === "predict" && <PredictView marketOptions={marketOptions} onSubmit={openOrder} wallet={wallet} connectWallet={connectWallet} />}
         {view === "detail" && detail && <PredictionDetailView p={detail} onOpenMarket={openMarket} onOpenProfile={openProfile} onBack={openOrder} />}
-        {view === "profile" && <ProfileView onOpenReceipt={setReceipt} />}
+        {view === "profile" && (
+          <ProfileView
+            profile={userProfileData}
+            profileLoading={userProfileLoading}
+            walletAddress={walletAddress}
+            onOpenReceipt={setReceipt}
+          />
+        )}
         {view === "leaderboard" && <LeaderboardView leaderboardData={leaderboardData} leaderboardLoading={leaderboardLoading} />}
         {view === "battle" && <BattleView onBack={openOrder} />}
       </div>
