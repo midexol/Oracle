@@ -128,24 +128,10 @@ const GlobalStyles = () => (
       z-index: 1;
     }
 
-    /* Background parallax — kept well within the oversized image so the
-       drift never pans past its edge and exposes bare space at a viewport
-       edge. Motion is scale + a small vertical drift only (no horizontal
-       translate), since this image's content (scattered spheres) is sparse
-       enough that even a small sideways pan can reveal a plain dark patch. */
-    @keyframes bgDrift {
-      0%   { transform: scale(1.14) translate(0px, 0px); }
-      50%  { transform: scale(1.18) translate(0px, -10px); }
-      100% { transform: scale(1.14) translate(0px, 0px); }
-    }
-    .bg-drift { animation: bgDrift 18s ease-in-out infinite; }
-
-    @keyframes bgDriftAlt {
-      0%   { transform: scale(1.14) translate(0px, 0px); }
-      50%  { transform: scale(1.18) translate(0px, 10px); }
-      100% { transform: scale(1.14) translate(0px, 0px); }
-    }
-    .bg-drift-alt { animation: bgDriftAlt 24s ease-in-out infinite; }
+    /* Background is completely static — no drift/pan animation at all,
+       eliminating any possibility of a pan revealing bare space at an edge. */
+    .bg-drift { }
+    .bg-drift-alt { }
 
     .hover-row { transition: background .15s ease, border-color .15s ease; }
     .btn { transition: filter .15s ease, transform .08s ease; }
@@ -292,10 +278,11 @@ const GlobalStyles = () => (
     .orc-root .nav-links { display: flex; align-items: center; gap: 30px; }
     .orc-root .bottom-nav { display: none; }
 
-    /* Desktop sidebar nav */
-    .orc-root .app-topbar-row { display: none; }
+    /* Desktop nav: horizontal top bar restored (sidebar markup kept in the
+       DOM below but hidden at all sizes) */
+    .orc-root .app-topbar-row { display: flex; }
     .orc-root .app-sidebar {
-      display: flex;
+      display: none;
       flex-direction: column;
       position: fixed;
       top: 0; left: 0; bottom: 0;
@@ -326,7 +313,7 @@ const GlobalStyles = () => (
     .orc-root .app-sidebar-link:hover { background: rgba(255,255,255,0.05); color: ${C.text}; }
     .orc-root .app-sidebar-link.active { background: rgba(32,229,138,0.1); color: ${C.up}; }
     .orc-root .app-sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
-    .orc-root .app-shell-content { padding-left: 220px; }
+    .orc-root .app-shell-content { padding-left: 0; }
 
     .orc-root .market-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .orc-root .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
@@ -344,7 +331,10 @@ const GlobalStyles = () => (
     .section-bg-img {
       position: absolute;
       object-fit: cover;
-      will-change: transform;
+      object-position: 74% 58%; /* frames the large sphere in this artwork
+        instead of the sparse gap that a default center-crop can land on
+        when a wide, sparsely-composed image is cropped into a narrow
+        portrait viewport */
     }
 
     /* ── Mobile optimizations — no overlapping ── */
@@ -494,11 +484,6 @@ const GlobalStyles = () => (
         min-height: 52px;
       }
       
-      /* Better padding for sections */
-      .orc-root [style*="padding"] { 
-        padding: 14px !important;
-      }
-      
       /* Ticker adjustments */
       .ticker-track { font-size: 10px; }
       
@@ -556,11 +541,6 @@ const GlobalStyles = () => (
       
       /* Compact modals */
       .glass-card { width: calc(100% - 16px) !important; padding: 14px !important; }
-      
-      /* Single column everything */
-      .orc-root [style*="grid-template-columns"] {
-        grid-template-columns: 1fr !important;
-      }
       
       /* Fix overlapping text */
       .orc-root .font-display { font-size: 14px; }
@@ -706,12 +686,15 @@ function PriceDisplay({ value, unit = "$", size = 32, color }) {
     maximumFractionDigits: numericValue >= 100 ? 2 : 3,
   }).format(numericValue);
   const [whole, dec] = formatted.includes(".") ? formatted.split(".") : [formatted, null];
+  // size can be a plain number (px) or any CSS length/clamp() string for
+  // responsive call sites — calc() supports multiplying either form.
+  const unitSize = typeof size === "number" ? size * 0.55 : `calc(${size} * 0.55)`;
 
   return (
     <span className="font-display tnum" style={{ fontSize: size, fontWeight: 700, letterSpacing: "-0.04em", color: color || C.text }}>
       {whole}
       {dec && <span style={{ color: C.faint, fontWeight: 600 }}>.{dec}</span>}
-      <span style={{ color: C.faint, fontWeight: 600, fontSize: size * 0.55 }}>{unit}</span>
+      <span style={{ color: C.faint, fontWeight: 600, fontSize: unitSize }}>{unit}</span>
     </span>
   );
 }
@@ -922,6 +905,7 @@ function Nav({ view, setView, wallet, walletBalance, signedIn, connectWallet, on
     ["market", "Markets", LineChart],
     ["predict", "Predict", Target],
     ["battle", "Battles", Flame],
+    ["leaderboard", "Rankings", Trophy],
     ["profile", "Profile", User],
   ];
   const sidebarItems = [
@@ -1106,17 +1090,17 @@ function Nav({ view, setView, wallet, walletBalance, signedIn, connectWallet, on
       {/* Mobile bottom nav — rendered outside the backdrop-filtered header,
           since backdrop-filter creates a containing block for fixed descendants
           and would pin "bottom:0" to the header box instead of the viewport. */}
-      <div className="bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "rgba(7,9,13,0.95)", backdropFilter: "blur(16px)", borderTop: `1px solid rgba(255,255,255,0.07)`, zIndex: 30, padding: "8px 0 10px" }}>
+      <div className="bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "rgba(7,9,13,0.95)", backdropFilter: "blur(16px)", borderTop: `1px solid rgba(255,255,255,0.07)`, zIndex: 30, padding: "6px 2px 8px" }}>
         <div className="flex items-center justify-around" style={{ width: "100%" }}>
       {mobileItems.map(([key, label, Icon]) => (
             <button
               key={key}
               onClick={() => setView(key)}
               className="flex flex-col items-center gap-1 font-body"
-              style={{ background: "none", border: "none", cursor: "pointer", color: activeTab === key ? C.up : C.muted, fontSize: 10, fontWeight: 600 }}
+              style={{ background: "none", border: "none", cursor: "pointer", color: activeTab === key ? C.up : C.muted, fontSize: 9, fontWeight: 600, padding: "2px 4px", minWidth: 0 }}
               aria-current={activeTab === key ? "page" : undefined}
             >
-              <Icon size={18} strokeWidth={2} />
+              <Icon size={16} strokeWidth={2} />
               {label}
             </button>
           ))}
@@ -1741,23 +1725,23 @@ function TradePanel({ market, onBack }) {
 function MarketView({ market, onBack }) {
   return (
     <div className="container page">
-      <div className="flex items-start justify-between" style={{ marginBottom: 18, gap: 12 }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 18, gap: 12, flexWrap: "wrap" }}>
         <div>
           <div className="font-body" style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>{market.market} · Will {market.asset} finish up?</div>
-          <div className="flex items-end" style={{ gap: 28 }}>
+          <div className="flex items-end" style={{ gap: 28, flexWrap: "wrap" }}>
             <div>
               <div className="font-body" style={{ fontSize: 10.5, color: C.up, marginBottom: 4, fontWeight: 700, letterSpacing: "0.08em" }}>UP</div>
-              <PriceDisplay value={market.price} size={48} />
+              <PriceDisplay value={market.price} size="clamp(24px, 7vw, 48px)" />
             </div>
             <div>
               <div className="font-body" style={{ fontSize: 10.5, color: C.down, marginBottom: 4, fontWeight: 700, letterSpacing: "0.08em" }}>DOWN</div>
-              <PriceDisplay value={100 - market.price} size={48} />
+              <PriceDisplay value={100 - market.price} size="clamp(24px, 7vw, 48px)" />
             </div>
           </div>
         </div>
         <div className="text-right">
           <div className="font-body" style={{ fontSize: 10, color: C.faint, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.08em" }}>Time left</div>
-          <div className="font-display tnum" style={{ fontSize: 18, color: C.gold, fontWeight: 700 }}>{market.time}</div>
+          <div className="font-display tnum" style={{ fontSize: 18, color: C.gold, fontWeight: 700, whiteSpace: "nowrap" }}>{market.time}</div>
         </div>
       </div>
 
@@ -2854,9 +2838,9 @@ export default function OracleDashboard({ onExit }) {
           className={`section-bg-img ${bgClass}`}
           style={{
             opacity: 0.28,
-            inset: "-20%",
-            width: "140%",
-            height: "140%",
+            inset: 0,
+            width: "100%",
+            height: "100%",
           }}
         />
         {/* White circular glow - top center */}
