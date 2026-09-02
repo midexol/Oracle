@@ -5,11 +5,14 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:analytics": "npm run dev --workspace=@signal/oracle-analytics",
+    "dev": "npm run dev --workspace=@signal/oracle-backend",
     "dev:dreamdex": "npm run typecheck --workspace=@signal/dreamdex-integration",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace=@signal/dreamdex-integration && npm run build --workspace=@signal/oracle-backend && npm run build --workspace=@signal/frontend --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "seed": "npm run seed --workspace=@signal/oracle-analytics",
-    "prisma:generate": "npm run prisma:generate --workspace=@signal/oracle-analytics"
+    "test:integration": "npm run test:integration --workspace=@signal/oracle-backend",
+    "db:generate": "npm run db:generate --workspace=@signal/oracle-backend",
+    "db:migrate": "npm run db:migrate --workspace=@signal/oracle-backend",
+    "db:seed": "npm run db:seed --workspace=@signal/oracle-backend"
   }
 }

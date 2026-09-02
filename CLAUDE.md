@@ -53,6 +53,18 @@ not a requirement — flag it explicitly rather than assuming it's needed.
 
 ## Where the DreamDEX-facing code lives
 
+### Monorepo layout
+
+| Package | Owns |
+|---|---|
+| `packages/dreamdex-integration` | The only importer of `@somnia-chain/markets-sdk`. |
+| `packages/oracle-backend` | API, Postgres schema, settlement pipeline, reputation + leaderboards. |
+| `packages/frontend` | Next.js UI. |
+
+`packages/oracle-analytics` (Prisma/SQLite) was retired once the reputation
+engine consolidated into `oracle-backend`; it is still in git history if any
+of its scoring work is wanted back.
+
 All contract/SDK interaction goes through `packages/dreamdex-integration`
 (`@signal/dreamdex-integration`). Nothing else in the monorepo should import
 `@somnia-chain/markets-sdk` directly — see that package's `README.md` for
