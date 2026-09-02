@@ -81,15 +81,15 @@ function GlobalStyles() {
       /* ── Background image animations ── */
       @keyframes bgDrift {
         0%   { transform: scale(1.10) translate(0px, 0px); }
-        25%  { transform: scale(1.12) translate(-26px,-16px); }
-        50%  { transform: scale(1.10) translate(-16px,-26px); }
-        75%  { transform: scale(1.12) translate(14px,-20px); }
+        25%  { transform: scale(1.12) translate(-8px,-6px); }
+        50%  { transform: scale(1.10) translate(-6px,-8px); }
+        75%  { transform: scale(1.12) translate(6px,-7px); }
         100% { transform: scale(1.10) translate(0px, 0px); }
       }
       @keyframes bgDriftAlt {
         0%   { transform: scale(1.08) translate(0px, 0px); }
-        33%  { transform: scale(1.10) translate(20px,14px); }
-        66%  { transform: scale(1.09) translate(-14px,22px); }
+        33%  { transform: scale(1.10) translate(6px,5px); }
+        66%  { transform: scale(1.09) translate(-5px,7px); }
         100% { transform: scale(1.08) translate(0px, 0px); }
       }
       .orl-bg-drift     { animation: bgDrift    18s ease-in-out infinite; will-change: transform; }
