@@ -113,6 +113,21 @@ The SDK and Oracle disagree about three things, and all three are reconciled in
 
 ## The reputation engine
 
+Three layers, all derived from `predictions`:
+
+| Module | Answers |
+| --- | --- |
+| [`scoring.ts`](src/analytics/scoring.ts) | How good is this predictor? (Wilson, edge, ROI, streaks) |
+| [`confidence.ts`](src/analytics/confidence.ts) | How much should you believe that, and are they good *right now*? |
+| [`leaderboard.ts`](src/analytics/leaderboard.ts) | How do they compare? |
+
+`confidence.ts` adds the two things a single career number cannot express: a
+**Bayesian credible interval** on the true win rate (Jeffreys prior, so 2-for-2
+and 200-for-200 stop looking identical), and a **momentum** score — an EWMA
+over recent calls, deliberately fast-moving so a predictor going cold is
+visible before their lifetime accuracy notices. Its incomplete-beta
+implementation is tested against closed forms, not just against itself.
+
 [`src/analytics/`](src/analytics/) — `predictions` is the source of truth; `user_stats` and
 `user_segment_stats` are a rebuildable cache of it.
 
@@ -252,6 +267,36 @@ A battle is two opposing calls on one contract. Backing a side is an ordinary
 no separate execution path. Side A is normalised to the UP call at creation, which is what lets
 the resolver pick a winner from the market outcome alone.
 
+### Frontend compatibility API — `/api`
+
+`packages/frontend` was written against the retired `oracle-analytics`
+contract, so that shape is served alongside the real one rather than forcing a
+mid-hackathon migration. Same tables, translated at the edge.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/leaderboard` | `?asset&duration&sortBy=prediction_score\|accuracy&limit` |
+| `GET` | `/api/users/:wallet/profile` | Wallet **or** username; wallet is case-insensitive |
+| `GET` | `/api/users/:wallet/score-breakdown` | Explainable factor-by-factor breakdown |
+| `GET` | `/api/predictions/:id/context` | The "why this matters" line |
+| `POST` | `/api/predictions` | Records a call; creates user and market on first use |
+
+Three differences from `/api/v1`, all inherited from the old contract:
+
+1. every payload is wrapped as `{ data: ... }`;
+2. **percentages are 0–100**, where `/api/v1` uses fractions 0–1;
+3. **prices are dollars** (`0.43`), where `/api/v1` uses integer cents (`43`).
+
+Those scales are the dangerous part — the UI renders `accuracy.toFixed(0)%` and
+`$${price.toFixed(2)}`, so a fraction in a percentage's place silently shows
+"1%" instead of "75%". `npm run smoke` asserts every one of them over real HTTP.
+
+⚠️ **`POST /api/predictions` is unauthenticated** and trusts the `wallet` in the
+body, exactly as the retired API did. Fine for a demo, not beyond one — anyone
+can post a call as any wallet. `POST /api/v1/predictions` is the authenticated
+equivalent (wallet signature → JWT), and the frontend should move to it. This
+whole surface is a shim with an expiry date; `/api/v1` is the real API.
+
 ### Realtime — `ws://localhost:4000/ws`
 
 ```jsonc
@@ -332,7 +377,8 @@ Oracle has no record of, which is not.
 | `npm run db:studio` | Drizzle Studio |
 | `npm run db:seed` | Demo predictors with genuinely-computed history |
 | `npm test` | Unit tests (64) |
-| `npm run test:integration` | Integration tests (33) against a real Postgres — boots a throwaway one if `TEST_DATABASE_URL` is unset, so it needs no Docker |
+| `npm run test:integration` | Integration tests against a real Postgres — boots a throwaway one if `TEST_DATABASE_URL` is unset, so it needs no Docker |
+| `npm run smoke` | Migrates, seeds, boots the server and exercises the frontend-facing `/api` over real HTTP |
 | `npm run typecheck` | `tsc --noEmit`, including scripts and configs |
 | `npm run build` | Compile to `dist/` |
 | `npm run db:migrate:prod` | Apply migrations from the compiled output (containers have no `tsx`) |
@@ -355,6 +401,13 @@ docker compose run --rm backend npm run db:seed
 
 Migrations are a deliberate separate step rather than part of boot, so two replicas starting
 at once cannot race each other through the same migration.
+
+### No Docker? Persistent local Postgres
+
+`npm run dev:postgres` (from the repo root) boots the same `embedded-postgres` binary the
+integration tests use, but against a data directory under `.dev-data/` that survives restarts
+instead of a throwaway one. Point `DATABASE_URL` at
+`postgresql://oracle:oracle@127.0.0.1:5432/oracle` and run migrate/seed as usual.
 
 ### About the seed
 
