@@ -402,6 +402,13 @@ docker compose run --rm backend npm run db:seed
 Migrations are a deliberate separate step rather than part of boot, so two replicas starting
 at once cannot race each other through the same migration.
 
+### No Docker? Persistent local Postgres
+
+`npm run dev:postgres` (from the repo root) boots the same `embedded-postgres` binary the
+integration tests use, but against a data directory under `.dev-data/` that survives restarts
+instead of a throwaway one. Point `DATABASE_URL` at
+`postgresql://oracle:oracle@127.0.0.1:5432/oracle` and run migrate/seed as usual.
+
 ### About the seed
 
 The seed does **not** write accuracy figures. Each persona gets a hidden per-segment hit rate and a

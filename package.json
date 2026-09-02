@@ -6,6 +6,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=@signal/oracle-backend",
+    "dev:postgres": "node scripts/dev-postgres.mjs",
     "dev:dreamdex": "npm run typecheck --workspace=@signal/dreamdex-integration",
     "build": "npm run build --workspace=@signal/dreamdex-integration && npm run build --workspace=@signal/oracle-backend && npm run build --workspace=@signal/frontend --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
