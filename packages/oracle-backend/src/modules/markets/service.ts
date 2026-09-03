@@ -24,6 +24,7 @@ export async function upsertMarket(m: DreamDexMarket) {
       closingReference: m.closingReference,
       status: m.status,
       outcome: m.outcome,
+      upOutcome: m.upOutcome,
       upPriceCents: m.upPriceCents,
       downPriceCents: m.downPriceCents,
       opensAt: new Date(m.opensAt),

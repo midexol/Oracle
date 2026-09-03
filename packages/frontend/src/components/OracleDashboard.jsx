@@ -20,7 +20,8 @@ import {
   Target,
 } from "lucide-react";
 import TradingViewChart, { marketToSymbol, marketToInterval } from "./TradingViewChart";
-import { getLeaderboard, getUserProfile, createPrediction, getAuthChallenge, verifyAuthSignature, setAuthToken } from "../services/api.js";
+import { getLeaderboard, getUserProfile, createPrediction, getAuthChallenge, verifyAuthSignature, setAuthToken, getMarkets } from "../services/api.js";
+import { placeWalletTrade } from "../services/dreamdexBrowser.js";
 
 /* ================================================================== *
  *  ORACLE - product dashboard (premium redesign)
@@ -632,6 +633,16 @@ function makeLiveCountdown() {
   const seconds = String(remaining % 60).padStart(2, "0");
   return `${minutes}:${seconds}`;
 }
+
+// Countdown to a real contract deadline, mm:ss, clamped at zero once closed.
+function countdownTo(closesAt) {
+  const remaining = Math.max(0, Math.floor((new Date(closesAt).getTime() - Date.now()) / 1000));
+  const minutes = String(Math.floor(remaining / 60)).padStart(2, "0");
+  const seconds = String(remaining % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
+const DURATION_LABELS = { "1M": "minute", "5M": "5 minutes", "15M": "15 minutes", "1H": "hour", "4H": "4 hours", "1D": "day" };
 
 function normalizeMarketPrice(asset, liveData) {
   const base = liveData?.[asset]?.price ?? FALLBACK_MARKETS[asset]?.price ?? 1;
@@ -1338,7 +1349,7 @@ function PredictView({ marketOptions, onSubmit, wallet, connectWallet }) {
       connectWallet();
       return;
     }
-    onSubmit({ market: selected.market, dir, stake, asset: selected.asset, price: selected.price });
+    onSubmit({ market: selected.market, dir, stake, asset: selected.asset, price: selected.price, symbol: selected.symbol, upOutcome: selected.upOutcome });
     setSubmitted(true);
     setTimeout(() => setSubmitted(false), 3000);
   };
@@ -1845,11 +1856,38 @@ function PredictionDetailView({ p, onOpenMarket, onOpenProfile, onBack }) {
 
 /* ──────────────────── Profile page ──────────────────── */
 
-function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt }) {
+function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt, connectWallet }) {
   const [activeTab, setActiveTab] = useState("history");
   const tabs = ["history", "specialties", "stats"];
 
-  const hasRealProfile = Boolean(walletAddress && profile);
+  if (!walletAddress) {
+    return (
+      <div className="container page" style={{ maxWidth: 640 }}>
+        <div className="flex flex-col items-center text-center" style={{ padding: "80px 20px", gap: 16 }}>
+          <div style={{
+            width: 64, height: 64, borderRadius: 999,
+            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <User size={26} color={C.muted} />
+          </div>
+          <div>
+            <div className="font-display" style={{ fontSize: 20, color: C.text, fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 6 }}>
+              No wallet connected
+            </div>
+            <p className="font-body" style={{ fontSize: 13, color: C.muted, maxWidth: 320, lineHeight: 1.6 }}>
+              Connect your wallet to see your Oracle Score, prediction history, and stats.
+            </p>
+          </div>
+          <Button variant="up" glow onClick={connectWallet} ariaLabel="Connect wallet" style={{ marginTop: 8, padding: "10px 20px" }}>
+            <span className="flex items-center gap-1.5"><Wallet size={14} />Connect Wallet</span>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const hasRealProfile = Boolean(profile);
 
   const view = hasRealProfile
     ? {
@@ -1870,7 +1908,7 @@ function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt }) 
       }
     : { ...predictor, initials: "MD" };
 
-  if (walletAddress && profileLoading && !profile) {
+  if (profileLoading && !profile) {
     return (
       <div className="container page" style={{ maxWidth: 640 }}>
         <div className="skeleton" style={{ height: 300, borderRadius: 12 }} />
@@ -2282,7 +2320,7 @@ function TradeModal({ order, onClose, status, onConfirm, onRetry }) {
   const payout = (amount * (100 / price)).toFixed(2);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(4,5,7,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: "16px", overflowY: "auto" }} onClick={status === "pending" ? undefined : onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(4,5,7,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: "16px", overflowY: "auto" }} onClick={["pending", "awaiting-signature", "submitted"].includes(status) ? undefined : onClose}>
       <div className="rise-in glass-card" style={{ padding: "clamp(16px, 3vw, 26px)", width: "clamp(280px, 90vw, 380px)", maxWidth: "100%" }} onClick={(e) => e.stopPropagation()}>
         {status === "confirm" && (
           <>
@@ -2305,6 +2343,31 @@ function TradeModal({ order, onClose, status, onConfirm, onRetry }) {
           <div className="text-center" style={{ padding: "18px 0" }}>
             <div className="spin" style={{ width: 30, height: 30, border: `2px solid rgba(255,255,255,0.08)`, borderTopColor: C.up, borderRadius: 999, margin: "0 auto 16px" }} />
             <div className="font-body" style={{ fontSize: "clamp(12px, 2vw, 13px)", color: C.muted }}>Submitting to DreamDEX…</div>
+          </div>
+        )}
+
+        {status === "awaiting-signature" && (
+          <div className="text-center" style={{ padding: "18px 0" }}>
+            <div className="spin" style={{ width: 30, height: 30, border: `2px solid rgba(255,255,255,0.08)`, borderTopColor: C.up, borderRadius: 999, margin: "0 auto 16px" }} />
+            <div className="font-body" style={{ fontSize: "clamp(12px, 2vw, 13px)", color: C.muted }}>Confirm the signature in your wallet…</div>
+          </div>
+        )}
+
+        {status === "submitted" && (
+          <div className="text-center" style={{ padding: "18px 0" }}>
+            <div className="spin" style={{ width: 30, height: 30, border: `2px solid rgba(255,255,255,0.08)`, borderTopColor: C.up, borderRadius: 999, margin: "0 auto 16px" }} />
+            <div className="font-body" style={{ fontSize: "clamp(12px, 2vw, 13px)", color: C.muted }}>Order sent to DreamDEX — recording your position…</div>
+          </div>
+        )}
+
+        {status === "chain-error" && (
+          <div className="text-center" style={{ padding: "10px 0" }}>
+            <div style={{ width: 52, height: 52, borderRadius: 999, background: C.downSoft, border: `1px solid ${C.downBorder}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+              <XIcon size={22} color={C.down} strokeWidth={2.5} />
+            </div>
+            <div className="font-display" style={{ fontSize: "clamp(14px, 2.5vw, 15px)", color: C.text, fontWeight: 700, marginBottom: 6 }}>Trade Not Signed</div>
+            <div className="font-body" style={{ fontSize: "clamp(11px, 2vw, 12px)", color: C.muted, marginBottom: 20 }}>The signature was rejected or the wallet couldn't submit the order — nothing was traded.</div>
+            <Button variant="ghost" full onClick={onRetry} style={{ minHeight: 44 }}>Try Again</Button>
           </div>
         )}
 
@@ -2533,6 +2596,7 @@ export default function OracleDashboard({ onExit }) {
   const [orderStatus, setOrderStatus] = useState("confirm");
   const [receipt, setReceipt] = useState(null);
   const [liveMarketData, setLiveMarketData] = useState(FALLBACK_MARKETS);
+  const [dreamdexMarkets, setDreamdexMarkets] = useState([]);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -2579,6 +2643,23 @@ export default function OracleDashboard({ onExit }) {
 
     fetchMarketData();
     const interval = setInterval(fetchMarketData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Real DreamDEX Event Contracts backing the Predict view - replaces what
+  // used to be a fabricated list built purely from CoinGecko price ticks.
+  useEffect(() => {
+    const fetchDreamdexMarkets = async () => {
+      try {
+        const items = await getMarkets({ limit: 20 });
+        setDreamdexMarkets(items);
+      } catch (error) {
+        console.error("Failed to fetch DreamDEX markets:", error);
+      }
+    };
+
+    fetchDreamdexMarkets();
+    const interval = setInterval(fetchDreamdexMarkets, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -2750,24 +2831,77 @@ export default function OracleDashboard({ onExit }) {
   const openProfile = () => setView("profile");
   const openOrder = (o) => { setOrder(o); setOrderStatus("confirm"); };
 
+  // `order.symbol` only exists on orders built from real DreamDEX markets
+  // (PredictView, wired to /api/v1/markets in Phase 3a). Orders opened from
+  // the mock social feed/battle views have no real market behind them, so
+  // they keep the old DB-only flow rather than attempting a real trade.
   const confirmOrder = async () => {
-    setOrderStatus("pending");
-    try {
-      // Only send to API if wallet is connected
-      if (walletAddress && order) {
-        await createPrediction({
-          wallet: walletAddress,
-          marketId: order.market || `${order.asset}-${order.dir}`,
-          asset: order.asset || "BTC",
-          duration: order.duration || "15M",
-          prediction: order.dir || "UP",
-          entryPrice: order.price ? order.price / 100 : 0.5, // Normalize to 0-1 range
-          username: wallet ? wallet : undefined,
-        });
+    if (!order) return;
+    const canTradeOnChain = signedIn && walletAddress && order.symbol;
+
+    if (!canTradeOnChain) {
+      setOrderStatus("pending");
+      try {
+        if (walletAddress) {
+          await createPrediction({
+            wallet: walletAddress,
+            marketId: order.market || `${order.asset}-${order.dir}`,
+            asset: order.asset || "BTC",
+            duration: order.duration || "15M",
+            prediction: order.dir || "UP",
+            entryPrice: order.price ? order.price / 100 : 0.5, // Normalize to 0-1 range
+            username: wallet ? wallet : undefined,
+          });
+        }
+        setTimeout(() => setOrderStatus("done"), 1100);
+      } catch (error) {
+        console.error("Failed to record prediction:", error);
+        setOrderStatus("error");
       }
-      setTimeout(() => setOrderStatus("done"), 1100);
+      return;
+    }
+
+    setOrderStatus("awaiting-signature");
+    let fillResult;
+    try {
+      fillResult = await placeWalletTrade({
+        address: walletAddress,
+        symbol: order.symbol,
+        side: order.dir || "UP",
+        usdStake: order.stake ?? order.amount ?? 10,
+        upOutcome: order.upOutcome,
+      });
+      setOrderStatus("submitted");
     } catch (error) {
-      console.error("Failed to record prediction:", error);
+      // Signature rejected, chain switch declined, RPC failure, etc. - the
+      // trade never happened, so this must read differently from "traded
+      // but our own bookkeeping failed" below.
+      console.error("On-chain trade failed:", error);
+      setOrderStatus("chain-error");
+      return;
+    }
+
+    try {
+      await createPrediction({
+        wallet: walletAddress,
+        marketId: order.symbol,
+        asset: order.asset || "BTC",
+        duration: order.duration || "15M",
+        prediction: order.dir || "UP",
+        // `fillResult` is a real UnifiedOrder here (placeWalletTrade always
+        // passes dryRun: false) - its `price` is the actual crossing price,
+        // already in the market's own 0-1 probability units. `referencePrice`
+        // only exists on backPrediction's dry-run branch, which this call
+        // path never takes, so it was always falling through to the wrong
+        // (raw asset price) fallback below.
+        entryPrice: fillResult?.price ?? (order.price ? order.price / 100 : 0.5),
+        username: wallet ? wallet : undefined,
+      });
+      setOrderStatus("done");
+    } catch (error) {
+      // The trade already landed on-chain - only our own record-keeping
+      // failed, so this is a distinct outcome from a rejected/failed trade.
+      console.error("Trade succeeded on-chain but failed to record it:", error);
       setOrderStatus("error");
     }
   };
@@ -2785,19 +2919,35 @@ export default function OracleDashboard({ onExit }) {
     { a: "MATIC/USD",p: formatUsd(liveMarketData.MATIC?.price?? FALLBACK_MARKETS.MATIC.price),chg: liveMarketData.MATIC?.change?? FALLBACK_MARKETS.MATIC.change },
   ], [liveMarketData]);
 
+  // Real, tradeable DreamDEX Event Contracts. Falls back to a fabricated
+  // list (old behavior) only while the real fetch hasn't landed yet, so
+  // PredictView never renders with nothing selectable.
   const marketOptions = useMemo(() => {
-    const btc = normalizeMarketPrice("BTC", liveMarketData);
-    const eth = normalizeMarketPrice("ETH", liveMarketData);
-    const sol = normalizeMarketPrice("SOL", liveMarketData);
+    if (!dreamdexMarkets.length) {
+      const btc = normalizeMarketPrice("BTC", liveMarketData);
+      const eth = normalizeMarketPrice("ETH", liveMarketData);
+      const sol = normalizeMarketPrice("SOL", liveMarketData);
+      return [
+        { id: "btc15", market: "BTC 15M", asset: "BTC", question: "Will BTC finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: btc.price },
+        { id: "btc1h", market: "BTC 1H", asset: "BTC", question: "Will BTC finish higher in the next hour?", time: makeLiveCountdown(), price: btc.price },
+        { id: "eth15", market: "ETH 15M", asset: "ETH", question: "Will ETH finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: eth.price },
+        { id: "eth1h", market: "ETH 1H", asset: "ETH", question: "Will ETH finish higher in the next hour?", time: makeLiveCountdown(), price: eth.price },
+        { id: "sol15", market: "SOL 15M", asset: "SOL", question: "Will SOL finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: sol.price },
+      ];
+    }
 
-    return [
-      { id: "btc15", market: "BTC 15M", asset: "BTC", question: "Will BTC finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: btc.price },
-      { id: "btc1h", market: "BTC 1H", asset: "BTC", question: "Will BTC finish higher in the next hour?", time: makeLiveCountdown(), price: btc.price },
-      { id: "eth15", market: "ETH 15M", asset: "ETH", question: "Will ETH finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: eth.price },
-      { id: "eth1h", market: "ETH 1H", asset: "ETH", question: "Will ETH finish higher in the next hour?", time: makeLiveCountdown(), price: eth.price },
-      { id: "sol15", market: "SOL 15M", asset: "SOL", question: "Will SOL finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: sol.price },
-    ];
-  }, [liveMarketData]);
+    return dreamdexMarkets.map((m) => ({
+      id: m.id,
+      market: `${m.asset} ${m.duration}`,
+      asset: m.asset,
+      question: `Will ${m.asset} finish higher in the next ${DURATION_LABELS[m.duration] ?? m.duration}?`,
+      time: countdownTo(m.closesAt),
+      price: normalizeMarketPrice(m.asset, liveMarketData).price,
+      // Needed by the wallet-signed trade call, not for display.
+      symbol: m.dreamdexMarketId,
+      upOutcome: m.upOutcome,
+    }));
+  }, [dreamdexMarkets, liveMarketData]);
 
   const predictions = useMemo(() => {
     const btc = normalizeMarketPrice("BTC", liveMarketData);
@@ -2895,6 +3045,7 @@ export default function OracleDashboard({ onExit }) {
             profileLoading={userProfileLoading}
             walletAddress={walletAddress}
             onOpenReceipt={setReceipt}
+            connectWallet={connectWallet}
           />
         )}
         {view === "leaderboard" && <LeaderboardView leaderboardData={leaderboardData} leaderboardLoading={leaderboardLoading} />}

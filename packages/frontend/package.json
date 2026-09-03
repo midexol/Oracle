@@ -10,9 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@signal/dreamdex-integration": "*",
     "lucide-react": "^1.39.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "viem": "^2.56.3"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",

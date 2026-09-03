@@ -4,6 +4,10 @@
  */
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api";
+// VITE_API_URL points at the legacy `/api` compat prefix; the real market
+// read model lives under `/api/v1` on the same host, added alongside it
+// rather than replacing it (compat routes still back predictions/auth).
+const API_BASE_V1 = API_BASE.replace(/\/api\/?$/, "/api/v1");
 const AUTH_TOKEN_STORAGE_KEY = "oracle:authToken";
 
 class ApiError extends Error {
@@ -52,6 +56,53 @@ async function apiFetch(endpoint: string, options?: RequestInit) {
   // Every oracle-analytics route wraps its payload as `{ data: ... }`.
   const body = await response.json();
   return body.data;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Markets (/api/v1 — unlike the /api compat routes, these return their
+// payload directly rather than wrapped in `{ data: ... }`)
+// ─────────────────────────────────────────────────────────────
+
+export interface DreamDexMarket {
+  id: string;
+  dreamdexMarketId: string;
+  asset: "BTC" | "ETH" | "SOL" | "SOMI";
+  duration: "1M" | "5M" | "15M" | "1H" | "4H" | "1D";
+  openingReference: string | null;
+  closingReference: string | null;
+  status: "OPEN" | "CLOSED" | "SETTLED" | "CANCELLED";
+  outcome: "UP" | "DOWN" | null;
+  upOutcome: "YES" | "NO";
+  upPriceCents: number | null;
+  downPriceCents: number | null;
+  opensAt: string;
+  closesAt: string;
+  settledAt: string | null;
+  predictionCount: number;
+}
+
+export interface MarketFilters {
+  status?: Array<"OPEN" | "CLOSED" | "SETTLED" | "CANCELLED">;
+  asset?: string;
+  duration?: string;
+  limit?: number;
+}
+
+export async function getMarkets(filters: MarketFilters = {}): Promise<DreamDexMarket[]> {
+  const query = new URLSearchParams();
+  if (filters.status?.length) query.append("status", filters.status.join(","));
+  if (filters.asset) query.append("asset", filters.asset);
+  if (filters.duration) query.append("duration", filters.duration);
+  if (filters.limit) query.append("limit", String(filters.limit));
+
+  const queryStr = query.toString();
+  const response = await fetch(`${API_BASE_V1}/markets${queryStr ? `?${queryStr}` : ""}`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: response.statusText }));
+    throw new ApiError(response.status, error.message || response.statusText);
+  }
+  const body = await response.json();
+  return body.items;
 }
 
 // ─────────────────────────────────────────────────────────────

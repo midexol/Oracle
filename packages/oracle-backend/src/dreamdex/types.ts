@@ -31,6 +31,13 @@ export interface DreamDexMarket {
   outcome: Direction | null;
   upPriceCents: number;
   downPriceCents: number;
+  /**
+   * Which outcome token ("YES"/"NO") means "price went up" for THIS market.
+   * Derived per-market from the contract's question phrasing (see
+   * dreamdex-integration's `resolveUpOutcome`) — not a global constant, and
+   * required by any real trade call against this market's symbol.
+   */
+  upOutcome: 'YES' | 'NO';
   opensAt: string;
   closesAt: string;
   settledAt: string | null;

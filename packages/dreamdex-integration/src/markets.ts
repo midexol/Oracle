@@ -55,45 +55,78 @@ export interface EventContract {
   info: UnifiedMarket;
 }
 
+// How long past expiry a not-yet-settled market still gets a ticker fetch.
+// DreamDEX is a shared venue - `exchange.markets` holds every binary market
+// ever created on it, not just Oracle's, and most of those are long expired
+// and resolved. Without this bound, listEventContracts() fetches a ticker
+// for the full historical set on every call (unbounded, and it only grows),
+// which is what pegged the process at 100%+ CPU under DREAMDEX_MODE=live.
+const SETTLEMENT_GRACE_SECONDS = 7 * 24 * 60 * 60;
+
+// Ticker fetches are per-market RPC calls; cap how many run at once so a
+// large batch of currently-active markets can't still fan out unbounded.
+const TICKER_FETCH_CONCURRENCY = 8;
+
+function isRelevant(m: UnifiedMarket, nowSec: number): boolean {
+  if (m.active) return true;
+  const binary = m.info.marketType === "BINARY" ? m.info : null;
+  if (!binary) return false;
+  const settled = binary.winningOutcome != null || binary.status === "Resolved" || binary.status === "Voided";
+  if (settled) return false;
+  return Number(binary.expiry) > nowSec - SETTLEMENT_GRACE_SECONDS;
+}
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]!);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export async function listEventContracts(exchange: SomniaMarkets): Promise<EventContract[]> {
   await exchange.loadMarkets();
+  const nowSec = Math.floor(Date.now() / 1000);
   const binaryMarkets = Object.values(exchange.markets).filter(
-    (m) => m.type === "binary" && TRACKED_ASSETS.has(assetOf(m.base)),
+    (m) => m.type === "binary" && TRACKED_ASSETS.has(assetOf(m.base)) && isRelevant(m, nowSec),
   );
 
-  return Promise.all(
-    binaryMarkets.map(async (m) => {
-      const up = await safeTicker(exchange, `${m.symbol}#YES`);
-      const binary = m.info.marketType === "BINARY" ? m.info : null;
-      const question = binary?.question ?? binary?.oracleQuestion ?? "";
-      const { outcome: upOutcome, assumed: upOutcomeAssumed } = resolveUpOutcome(question);
+  return mapWithConcurrency(binaryMarkets, TICKER_FETCH_CONCURRENCY, async (m) => {
+    const up = await safeTicker(exchange, `${m.symbol}#YES`);
+    const binary = m.info.marketType === "BINARY" ? m.info : null;
+    const question = binary?.question ?? binary?.oracleQuestion ?? "";
+    const { outcome: upOutcome, assumed: upOutcomeAssumed } = resolveUpOutcome(question);
 
-      // The book only ever quotes YES; the other side is its complement. Which
-      // of those is "UP" depends on the question, hence upOutcome.
-      const yesPrice = up?.last ?? null;
-      const upPrice =
-        yesPrice == null ? null : upOutcome === "YES" ? yesPrice : 1 - yesPrice;
+    // The book only ever quotes YES; the other side is its complement. Which
+    // of those is "UP" depends on the question, hence upOutcome.
+    const yesPrice = up?.last ?? null;
+    const upPrice =
+      yesPrice == null ? null : upOutcome === "YES" ? yesPrice : 1 - yesPrice;
 
-      return {
-        symbol: m.symbol,
-        marketId: binary?.marketId ?? null,
-        asset: assetOf(m.base),
-        question,
-        strike: binary?.strike ?? null,
-        upPrice,
-        downPrice: upPrice == null ? null : 1 - upPrice,
-        status: binary?.status ?? "unknown",
-        tradingStart: binary ? Number(binary.tradingStart) : 0,
-        expiry: binary ? Number(binary.expiry) : 0,
-        upOutcome,
-        upOutcomeAssumed,
-        winningOutcome: binary?.winningOutcome ?? null,
-        voided: binary?.voided ?? false,
-        resolvedAt: binary?.resolvedAtTimestamp ? Number(binary.resolvedAtTimestamp) : null,
-        info: m,
-      };
-    }),
-  );
+    return {
+      symbol: m.symbol,
+      marketId: binary?.marketId ?? null,
+      asset: assetOf(m.base),
+      question,
+      strike: binary?.strike ?? null,
+      upPrice,
+      downPrice: upPrice == null ? null : 1 - upPrice,
+      status: binary?.status ?? "unknown",
+      tradingStart: binary ? Number(binary.tradingStart) : 0,
+      expiry: binary ? Number(binary.expiry) : 0,
+      upOutcome,
+      upOutcomeAssumed,
+      winningOutcome: binary?.winningOutcome ?? null,
+      voided: binary?.voided ?? false,
+      resolvedAt: binary?.resolvedAtTimestamp ? Number(binary.resolvedAtTimestamp) : null,
+      info: m,
+    };
+  });
 }
 
 export async function getEventContract(

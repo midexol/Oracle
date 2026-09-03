@@ -10,6 +10,13 @@ export const assetEnum = pgEnum('asset', ['BTC', 'ETH', 'SOL', 'SOMI']);
 export const durationEnum = pgEnum('duration', ['1M', '5M', '15M', '1H', '4H', '1D']);
 
 /**
+ * Which on-chain outcome token ("YES"/"NO") means "price went up" for a
+ * given Event Contract. Derived per-market from the contract's question
+ * phrasing — not a global constant, and required to place a real trade.
+ */
+export const outcomeTokenEnum = pgEnum('outcome_token', ['YES', 'NO']);
+
+/**
  * Market lifecycle.
  *  OPEN      - accepting orders and predictions
  *  CLOSED    - past cutoff, awaiting on-chain settlement

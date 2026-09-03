@@ -8,7 +8,7 @@ import {
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import { assetEnum, durationEnum, directionEnum, marketStatusEnum } from './enums.js';
+import { assetEnum, durationEnum, directionEnum, marketStatusEnum, outcomeTokenEnum } from './enums.js';
 
 /**
  * A local mirror of a DreamDEX Event Contract.
@@ -37,6 +37,13 @@ export const markets = pgTable(
     status: marketStatusEnum('status').notNull().default('OPEN'),
     /** Populated only once status = SETTLED. */
     outcome: directionEnum('outcome'),
+
+    /**
+     * Which outcome token means "price went up" for THIS market - required to
+     * place a real trade against dreamdexMarketId. Immutable once synced, so
+     * never touched by upsertMarket's update branch.
+     */
+    upOutcome: outcomeTokenEnum('up_outcome').notNull().default('YES'),
 
     /** Last seen quote, refreshed by the market sync job. */
     upPriceCents: integer('up_price_cents'),

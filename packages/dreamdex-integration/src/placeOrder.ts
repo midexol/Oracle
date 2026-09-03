@@ -39,6 +39,11 @@ export async function backPrediction(
   const outcome = side === "UP" ? upOutcome : downOutcome;
   const tradable = `${symbol}#${outcome}`;
 
+  // fetchTicker/createOrder both resolve `ref` through the SDK's in-memory
+  // symbol registry, which only `loadMarkets()` populates - unlike
+  // fetchMyTrades(), neither call does this itself.
+  await exchange.loadMarkets();
+
   const ticker = await exchange.fetchTicker(tradable);
   const referencePrice = ticker.last;
   if (!referencePrice) {

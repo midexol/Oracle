@@ -13,7 +13,7 @@ import {
   type SettlementSubscription,
 } from '@signal/dreamdex-integration';
 import type { SomniaMarkets } from '@somnia-chain/markets-sdk';
-import type { Hex } from 'viem';
+import { formatUnits, type Hex } from 'viem';
 import type {
   Asset,
   DreamDexClient,
@@ -87,8 +87,19 @@ export class LiveDreamDexClient implements DreamDexClient {
 
     await this.discover();
     const every = this.config.discoverIntervalMs ?? 30_000;
+    // Guard against overlap: discover() fans out a ticker fetch per tracked
+    // market, and a slow run (e.g. under RPC load) must not stack a second
+    // one on top of it - that compounding was what pegged the process at
+    // 100%+ CPU under DREAMDEX_MODE=live.
+    let discovering = false;
     this.discoverTimer = setInterval(() => {
-      void this.discover().catch((err) => this.emit((h) => h.onError?.(err)));
+      if (discovering) return;
+      discovering = true;
+      void this.discover()
+        .catch((err) => this.emit((h) => h.onError?.(err)))
+        .finally(() => {
+          discovering = false;
+        });
     }, every);
     this.discoverTimer.unref?.();
 
@@ -127,8 +138,12 @@ export class LiveDreamDexClient implements DreamDexClient {
   }
 
   async getMarket(marketId: string): Promise<DreamDexMarket | null> {
-    const contracts = await listEventContracts(this.requireExchange());
-    const found = contracts.find((c) => c.symbol === marketId);
+    // Was calling listEventContracts() directly - the same N-ticker-fetch
+    // cost findContract()'s own docstring warns against, except paid on
+    // every call instead of once per cache window. The resolver's sweep
+    // calls getMarket() up to 50x per tick, so this turned one stranded
+    // market into up to 50x "fetch every market's ticker" per 10s.
+    const found = await this.findContract(marketId);
     if (!found) return null;
 
     // The indexed row already carries the resolution, so no extra call is
@@ -374,7 +389,7 @@ export class LiveDreamDexClient implements DreamDexClient {
               h.onMarketSettled?.({
                 marketId: contract.symbol,
                 outcome: result.winningOutcome === contract.upOutcome ? 'UP' : 'DOWN',
-                closingReference: contract.strike,
+                closingReference: normalizeStrike(contract.strike),
                 settledAt: new Date().toISOString(),
               }),
             );
@@ -429,6 +444,28 @@ const CONTRACT_CACHE_MS = 30_000;
 const toCents = (price: number): number =>
   Math.min(99, Math.max(1, Math.round(price * 100)));
 
+/**
+ * `EventContract.strike` is a raw on-chain integer string in the oracle's
+ * own price scale, not a human price - the SDK deliberately leaves it
+ * unconverted (see `markets.ts`'s "raw price scale" doc). Every live series
+ * observed so far uses 1e18 fixed-point (a strike of
+ * "69830345000000000000000" is BTC at $69,830.345), matching the SDK's
+ * PRICE_FEED_DECIMALS constant, but that constant belongs to the separate
+ * real-time price feed, not a guaranteed invariant of `strike` - if a future
+ * series uses different decimals this will misread its opening/closing
+ * reference, so treat this as empirical, not contractual.
+ */
+const STRIKE_DECIMALS = 18;
+
+function normalizeStrike(raw: string | null): string | null {
+  if (raw == null) return null;
+  try {
+    return formatUnits(BigInt(raw), STRIKE_DECIMALS);
+  } catch {
+    return null;
+  }
+}
+
 export function toMarket(
   contract: EventContract,
   settlement?: { state: 'pending' | 'resolved' | 'voided'; winningOutcome?: 'YES' | 'NO' },
@@ -466,12 +503,13 @@ export function toMarket(
     duration: inferDuration(contract),
     // The strike is the level the question resolves against - exactly what
     // the PRD calls the opening reference.
-    openingReference: contract.strike,
+    openingReference: normalizeStrike(contract.strike),
     closingReference: null,
     status,
     outcome,
     upPriceCents,
     downPriceCents: 100 - upPriceCents,
+    upOutcome: contract.upOutcome,
     opensAt: opensAt.toISOString(),
     closesAt: closesAt.toISOString(),
     settledAt: status === 'SETTLED' ? settledAt : null,

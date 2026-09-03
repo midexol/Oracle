@@ -377,6 +377,10 @@ export class MockDreamDexClient implements DreamDexClient {
       outcome: null,
       upPriceCents: 50,
       downPriceCents: 50,
+      // The simulator has no real question text to parse an outcome from -
+      // it's always a synthetic "will price go up" market, so YES==UP holds
+      // by construction here, unlike the live client where this is derived.
+      upOutcome: 'YES',
       opensAt: new Date(now).toISOString(),
       closesAt: new Date(now + wallClockMs).toISOString(),
       settledAt: null,
