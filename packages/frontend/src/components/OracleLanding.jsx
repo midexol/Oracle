@@ -78,22 +78,12 @@ function GlobalStyles() {
 
       .orl-root .site-container { max-width: 1140px; margin: 0 auto; padding: 0 40px; }
 
-      /* ── Background image animations ── */
-      @keyframes bgDrift {
-        0%   { transform: scale(1.10) translate(0px, 0px); }
-        25%  { transform: scale(1.12) translate(-8px,-6px); }
-        50%  { transform: scale(1.10) translate(-6px,-8px); }
-        75%  { transform: scale(1.12) translate(6px,-7px); }
-        100% { transform: scale(1.10) translate(0px, 0px); }
-      }
-      @keyframes bgDriftAlt {
-        0%   { transform: scale(1.08) translate(0px, 0px); }
-        33%  { transform: scale(1.10) translate(6px,5px); }
-        66%  { transform: scale(1.09) translate(-5px,7px); }
-        100% { transform: scale(1.08) translate(0px, 0px); }
-      }
-      .orl-bg-drift     { animation: bgDrift    18s ease-in-out infinite; will-change: transform; }
-      .orl-bg-drift-alt { animation: bgDriftAlt 24s ease-in-out infinite; will-change: transform; }
+      /* ── Background images are completely static — no drift/pan
+         animation at all, on any screen size. A fixed crop can't ever
+         expose an edge, so this removes the possibility entirely rather
+         than trying to keep tuning the animation's math. ── */
+      .orl-bg-drift     { }
+      .orl-bg-drift-alt { }
 
       /* ── Hero ── */
       .orl-root .hero-section {
@@ -101,7 +91,7 @@ function GlobalStyles() {
         min-height: 100vh; display: flex; align-items: center; background: #000;
       }
       .orl-root .hero-bg-img {
-        position: absolute; inset: -8%; width: 116%; height: 116%;
+        position: absolute; inset: 0; width: 100%; height: 100%;
         object-fit: cover; object-position: center; opacity: 1;
       }
       .orl-root .hero-overlay {
@@ -114,7 +104,7 @@ function GlobalStyles() {
       /* ── Gradient sections (image 4) ── */
       .orl-root .gradient-section { position: relative; overflow: hidden; background: #07090D; }
       .orl-root .gradient-bg-img {
-        position: absolute; inset: -8%; width: 116%; height: 116%;
+        position: absolute; inset: 0; width: 100%; height: 100%;
         object-fit: cover; opacity: 0.65; mix-blend-mode: screen;
       }
       .orl-root .gradient-overlay {
@@ -125,8 +115,9 @@ function GlobalStyles() {
       /* ── Spheres section (image 5) ── */
       .orl-root .spheres-section { position: relative; overflow: hidden; background: #000; }
       .orl-root .spheres-bg-img {
-        position: absolute; inset: -8%; width: 116%; height: 116%;
+        position: absolute; inset: 0; width: 100%; height: 100%;
         object-fit: cover; opacity: 0.8;
+        object-position: 74% 58%; /* frame the large sphere, not the gap */
       }
       .orl-root .spheres-overlay {
         position: absolute; inset: 0;

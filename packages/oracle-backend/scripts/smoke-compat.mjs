@@ -15,6 +15,12 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import EmbeddedPostgres from 'embedded-postgres';
+import { privateKeyToAccount } from 'viem/accounts';
+
+// Fixed key so the run is reproducible; this address owns nothing.
+const signer = privateKeyToAccount(
+  '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
+);
 
 const freePort = () =>
   new Promise((resolve, reject) => {
@@ -37,6 +43,52 @@ function run(cmd, args, env) {
     const c = spawn(cmd, args, { stdio: 'inherit', env: { ...process.env, ...env } });
     c.on('exit', (code) => resolve(code ?? 1));
   });
+}
+
+/**
+ * Start the server and wait for /health, buffering its output.
+ *
+ * A silent, hanging boot used to be the failure mode here: the process could
+ * sit retrying a bad DB connection forever with nothing printed, and the only
+ * way to find out why was to re-run by hand with stdio inherited. On a
+ * timeout or an early exit this now throws with exactly what the server
+ * logged.
+ */
+async function bootServer(env, apiPort) {
+  const output = [];
+  const child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
+    env: { ...process.env, ...env },
+  });
+  child.stdout.on('data', (d) => output.push(d.toString()));
+  child.stderr.on('data', (d) => output.push(d.toString()));
+
+  let exited = false;
+  let exitCode = null;
+  child.on('exit', (code) => {
+    exited = true;
+    exitCode = code;
+  });
+
+  const base = `http://127.0.0.1:${apiPort}`;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (exited) {
+      throw new Error(
+        `Server exited early (code ${exitCode}) before /health responded:
+${output.join('')}`,
+      );
+    }
+    try {
+      if ((await fetch(`${base}/health`)).status === 200) return child;
+    } catch {
+      /* not up yet */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  child.kill();
+  throw new Error(`Server never became healthy within 30s. Output:
+${output.join('')}`);
 }
 
 async function main() {
@@ -82,21 +134,9 @@ async function main() {
     }
 
     console.log('\n== boot server ==');
-    server = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
-      stdio: 'ignore',
-      env: { ...process.env, ...env },
-    });
-
+    server = await bootServer(env, apiPort);
     const base = `http://127.0.0.1:${apiPort}`;
-    for (let i = 0; i < 60; i++) {
-      try {
-        const r = await fetch(`${base}/health`);
-        if (r.status === 200) break;
-      } catch {
-        /* not up yet */
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
+    let baseForV1 = base;
 
     console.log('\n== GET /api/leaderboard ==');
     const lbRes = await fetch(`${base}/api/leaderboard?limit=10`);
@@ -242,8 +282,78 @@ async function main() {
     });
     check('400 for a bad entry price', badRes.status === 400, String(badRes.status));
 
+    console.log('== production refuses unsigned writes ==');
+    // Restart with the guard on. This is the check that matters most: an
+    // untested guard is how an open write endpoint reaches production.
+    server.kill();
+    await new Promise((r) => setTimeout(r, 1000));
+    const lockedPort = await freePort();
+    server = await bootServer(
+      { ...env, PORT: String(lockedPort), COMPAT_ALLOW_UNSIGNED_WRITES: 'false' },
+      lockedPort,
+    );
+    const lockedBase = `http://127.0.0.1:${lockedPort}`;
+    baseForV1 = lockedBase;
+
+    const blocked = await fetch(`${lockedBase}/api/predictions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, marketId: 'BTC-15M-locked' }),
+    });
+    check('unsigned write refused with 401', blocked.status === 401, String(blocked.status));
+    const blockedBody = await blocked.json();
+    check(
+      'refusal explains how to sign in',
+      String(blockedBody.message ?? '').includes('auth/challenge'),
+      JSON.stringify(blockedBody).slice(0, 140),
+    );
+
+    const stillPublic = await fetch(`${lockedBase}/api/leaderboard`);
+    check(
+      'reads stay public while writes are locked',
+      stillPublic.status === 200,
+      String(stillPublic.status),
+    );
+
+    const chal = await fetch(`${lockedBase}/api/auth/challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress: signer.address }),
+    });
+    const challenge = (await chal.json()).data;
+    const signature = await signer.signMessage({ message: challenge.message });
+    const ver = await fetch(`${lockedBase}/api/auth/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        walletAddress: signer.address,
+        nonce: challenge.nonce,
+        signature,
+      }),
+    });
+    check('sign-in works over the compat surface', ver.status === 200, String(ver.status));
+    const token = (await ver.json()).data?.token;
+
+    const signed = await fetch(`${lockedBase}/api/predictions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ ...payload, wallet: signer.address, marketId: 'BTC-15M-signed' }),
+    });
+    check('signed write accepted while locked', signed.status === 201, String(signed.status));
+
+    const forged = await fetch(`${lockedBase}/api/predictions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        ...payload,
+        wallet: '0x000000000000000000000000000000000000dEaD',
+        marketId: 'BTC-15M-forged',
+      }),
+    });
+    check('cannot post as another wallet', forged.status === 403, String(forged.status));
+
     console.log('\n== /api/v1 still intact ==');
-    const v1 = await fetch(`${base}/api/v1/leaderboard`);
+    const v1 = await fetch(`${baseForV1}/api/v1/leaderboard`);
     const v1Body = await v1.json();
     check('v1 leaderboard 200', v1.status === 200, String(v1.status));
     check('v1 is NOT enveloped', v1Body.data === undefined, JSON.stringify(v1Body).slice(0, 100));
