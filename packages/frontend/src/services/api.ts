@@ -4,6 +4,7 @@
  */
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api";
+const AUTH_TOKEN_STORAGE_KEY = "oracle:authToken";
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -12,11 +13,33 @@ class ApiError extends Error {
   }
 }
 
+let authToken: string | null = null;
+try {
+  authToken = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+} catch {
+  // localStorage unavailable (SSR, privacy mode) - stay signed out.
+}
+
+export function setAuthToken(token: string | null) {
+  authToken = token;
+  try {
+    if (token) localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+    else localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures - token still holds for this session.
+  }
+}
+
+export function getAuthToken() {
+  return authToken;
+}
+
 async function apiFetch(endpoint: string, options?: RequestInit) {
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       ...options?.headers,
     },
   });
@@ -148,6 +171,46 @@ export async function getLeaderboard(params: LeaderboardParams = {}): Promise<Le
 
   const queryStr = query.toString();
   return apiFetch(`/leaderboard${queryStr ? `?${queryStr}` : ""}`);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Wallet sign-in
+// ─────────────────────────────────────────────────────────────
+
+export interface AuthChallenge {
+  nonce: string;
+  message: string;
+  expiresAt: string;
+}
+
+export async function getAuthChallenge(walletAddress: string): Promise<AuthChallenge> {
+  return apiFetch("/auth/challenge", {
+    method: "POST",
+    body: JSON.stringify({ walletAddress }),
+  });
+}
+
+export interface VerifyAuthPayload {
+  walletAddress: string;
+  nonce: string;
+  signature: string;
+}
+
+export interface AuthResult {
+  token: string;
+  user: { id: string; wallet: string; username?: string };
+  isNewUser: boolean;
+}
+
+// Stores the returned JWT for subsequent apiFetch calls - callers don't need
+// to thread it through manually.
+export async function verifyAuthSignature(payload: VerifyAuthPayload): Promise<AuthResult> {
+  const result = await apiFetch("/auth/verify", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  setAuthToken(result.token);
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────
