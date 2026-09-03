@@ -45,6 +45,52 @@ function run(cmd, args, env) {
   });
 }
 
+/**
+ * Start the server and wait for /health, buffering its output.
+ *
+ * A silent, hanging boot used to be the failure mode here: the process could
+ * sit retrying a bad DB connection forever with nothing printed, and the only
+ * way to find out why was to re-run by hand with stdio inherited. On a
+ * timeout or an early exit this now throws with exactly what the server
+ * logged.
+ */
+async function bootServer(env, apiPort) {
+  const output = [];
+  const child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
+    env: { ...process.env, ...env },
+  });
+  child.stdout.on('data', (d) => output.push(d.toString()));
+  child.stderr.on('data', (d) => output.push(d.toString()));
+
+  let exited = false;
+  let exitCode = null;
+  child.on('exit', (code) => {
+    exited = true;
+    exitCode = code;
+  });
+
+  const base = `http://127.0.0.1:${apiPort}`;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (exited) {
+      throw new Error(
+        `Server exited early (code ${exitCode}) before /health responded:
+${output.join('')}`,
+      );
+    }
+    try {
+      if ((await fetch(`${base}/health`)).status === 200) return child;
+    } catch {
+      /* not up yet */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  child.kill();
+  throw new Error(`Server never became healthy within 30s. Output:
+${output.join('')}`);
+}
+
 async function main() {
   // CI supplies a Postgres service container; locally we boot a throwaway one.
   const external = process.env.TEST_DATABASE_URL;
@@ -88,22 +134,9 @@ async function main() {
     }
 
     console.log('\n== boot server ==');
-    server = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
-      stdio: 'ignore',
-      env: { ...process.env, ...env },
-    });
-
+    server = await bootServer(env, apiPort);
     const base = `http://127.0.0.1:${apiPort}`;
     let baseForV1 = base;
-    for (let i = 0; i < 60; i++) {
-      try {
-        const r = await fetch(`${base}/health`);
-        if (r.status === 200) break;
-      } catch {
-        /* not up yet */
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
 
     console.log('\n== GET /api/leaderboard ==');
     const lbRes = await fetch(`${base}/api/leaderboard?limit=10`);
@@ -255,27 +288,12 @@ async function main() {
     server.kill();
     await new Promise((r) => setTimeout(r, 1000));
     const lockedPort = await freePort();
-    const locked = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
-      stdio: 'ignore',
-      env: {
-        ...process.env,
-        ...env,
-        PORT: String(lockedPort),
-        COMPAT_ALLOW_UNSIGNED_WRITES: 'false',
-      },
-    });
-    server = locked;
-
+    server = await bootServer(
+      { ...env, PORT: String(lockedPort), COMPAT_ALLOW_UNSIGNED_WRITES: 'false' },
+      lockedPort,
+    );
     const lockedBase = `http://127.0.0.1:${lockedPort}`;
     baseForV1 = lockedBase;
-    for (let i = 0; i < 60; i++) {
-      try {
-        if ((await fetch(`${lockedBase}/health`)).status === 200) break;
-      } catch {
-        /* not up yet */
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
 
     const blocked = await fetch(`${lockedBase}/api/predictions`, {
       method: 'POST',
