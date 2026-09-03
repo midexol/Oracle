@@ -25,7 +25,8 @@ COPY packages/dreamdex-integration ./packages/dreamdex-integration
 COPY packages/oracle-backend ./packages/oracle-backend
 # The backend imports @signal/dreamdex-integration, which ships compiled JS -
 # so it has to be built first, not just present as source.
-RUN npm run build --workspace=@signal/dreamdex-integration \n && npm run build --workspace=@signal/oracle-backend
+RUN npm run build --workspace=@signal/dreamdex-integration \
+ && npm run build --workspace=@signal/oracle-backend
 
 # ---------------------------------------------------------------- prod deps
 # A second, dev-free install. The build needs typescript and tsx; the runtime
