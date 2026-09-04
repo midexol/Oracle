@@ -17,8 +17,40 @@ import {
   type PredictionSide,
 } from "@signal/dreamdex-integration";
 
+// Fixed for the hackathon build (see loadConfig()) - safe to read once at
+// module load so the UI can show the expected network's name without
+// round-tripping through the wallet first.
+export const EXPECTED_CHAIN = loadConfig().chain;
+
+// `collateral` is the current field name, `testUsdc` its legacy alias -
+// SOMNIA_TESTNET_ADDRESSES always sets both today, but fall back just in
+// case a future config only sets one.
+const testUsdcAddress = loadConfig().addresses.collateral ?? loadConfig().addresses.testUsdc;
+if (!testUsdcAddress) throw new Error("No collateral/testUsdc address configured for this network");
+
+/** Watch-asset params for TestUSDC - most wallets (MetaMask, Rabby, ...) only
+ * auto-discover a chain's native gas token, not arbitrary ERC-20s, so a
+ * freshly-faucet'd balance is otherwise invisible until a user adds this
+ * manually. */
+export const TEST_USDC_TOKEN = {
+  address: testUsdcAddress,
+  symbol: "tUSDC",
+  decimals: 6,
+} as const;
+
+/** Prompts the wallet's own "Add token" dialog (EIP-747) for TestUSDC. */
+export async function addTestUsdcToWallet(provider: EIP1193Provider) {
+  return provider.request({
+    method: "wallet_watchAsset",
+    params: {
+      type: "ERC20",
+      options: TEST_USDC_TOKEN,
+    },
+  } as any);
+}
+
 /** Switches (or, if unrecognized, registers) the wallet onto Somnia testnet. */
-async function ensureChain(provider: EIP1193Provider) {
+export async function ensureChain(provider: EIP1193Provider) {
   const { chain } = loadConfig();
   const hexChainId = `0x${chain.id.toString(16)}`;
 

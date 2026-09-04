@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { ChevronUp, ChevronDown, ArrowRight, Check, Trophy, Zap, Users, TrendingUp, Search, CircleCheck, Minus, Plus } from "lucide-react";
+import { getLeaderboard, getMarkets } from "../services/api.js";
 
 /* ================================================================== *
  *  ORACLE - Premium Landing Page
@@ -49,6 +50,13 @@ function formatUsd(value) {
 
 function formatSignedPercent(value) {
   return `${value >= 0 ? "+" : ""}${Number(value || 0).toFixed(2)}%`;
+}
+
+function countdownTo(closesAt) {
+  const remaining = Math.max(0, Math.floor((new Date(closesAt).getTime() - Date.now()) / 1000));
+  const minutes = String(Math.floor(remaining / 60)).padStart(2, "0");
+  const seconds = String(remaining % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
 }
 
 function GlobalStyles() {
@@ -390,41 +398,33 @@ function SectionHeader({ eyebrow, headline, sub, center=true }) {
   );
 }
 
-/* ──────────────── Social prediction card ──────────────── */
-function SocialPredCard({ user, initials, acc, market, contractId, dir, price, assetAcc, asset, time, onBack, watched, backed }) {
+/* ──────────────── Live market card ──────────────── */
+// A real open DreamDEX market - there is no real "who's backing this" feed
+// yet, so this shows the market's own real numbers (not a fabricated
+// trader's call), matching the section headline's claim that every
+// prediction shown is connected to a live Event Contract.
+function SocialPredCard({ market, dir, asset, time, upPct, downPct, predictionCount, onBack }) {
   const up = dir==="UP";
   return (
     <div className="social-card" style={{ position:"relative" }}>
-      {/* User header - X/Twitter style */}
       <div className="flex items-center justify-between" style={{ padding:"16px 18px 12px", borderBottom:"1px solid rgba(255,255,255,0.05)" }}>
-        <div className="flex items-center gap-2.5">
-          <Avatar initials={initials} size={40} live />
-          <div>
-            <div className="font-body" style={{ fontSize:14, color:"#fff", fontWeight:700 }}>@{user}</div>
-            <div className="font-body tnum" style={{ fontSize:11, color:C.muted }}>{acc}% overall accuracy</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <LiveDot label="LIVE" />
-          <span style={{ fontSize:10, fontWeight:600, color:C.muted, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.07)", padding:"3px 8px", borderRadius:999 }}>{contractId}</span>
-        </div>
+        <div className="font-display" style={{ fontSize:16, color:"#fff", fontWeight:700 }}>{market}</div>
+        <LiveDot label="LIVE" />
       </div>
 
-      {/* Prediction content - the "post" */}
       <div style={{ padding:"14px 18px 0" }}>
         <div className="flex items-center justify-between" style={{ marginBottom:12 }}>
           <div>
-            <div className="font-display" style={{ fontSize:22, fontWeight:700, color:"#fff", letterSpacing:"-0.02em" }}>{market}</div>
-            <div className="font-body" style={{ fontSize:12.5, color:C.muted, marginTop:3 }}>Will {asset} finish higher?</div>
+            <div className="font-body" style={{ fontSize:12.5, color:C.muted }}>Will {asset} finish higher?</div>
           </div>
           <DirBadge dir={dir} />
         </div>
 
-        {/* 3-column stats */}
+        {/* 3-column stats - all real DreamDEX numbers */}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:0, borderTop:"1px solid rgba(255,255,255,0.05)", borderBottom:"1px solid rgba(255,255,255,0.05)", padding:"12px 0", marginBottom:14 }}>
           {[
-            { label:"DREAMDEX", value:formatUsd(price), color:up?C.up:C.down },
-            { label:`${asset} ACC.`, value:Math.round(assetAcc)+"%", color:"#fff" },
+            { label:"UP", value:`${upPct}%`, color:C.up },
+            { label:"DOWN", value:`${downPct}%`, color:C.down },
             { label:"TIME LEFT", value:time, color:C.gold },
           ].map((s,i) => (
             <div key={i} style={{ textAlign:"center", borderRight:i<2?"1px solid rgba(255,255,255,0.06)":"none", padding:"0 4px" }}>
@@ -446,10 +446,8 @@ function SocialPredCard({ user, initials, acc, market, contractId, dir, price, a
         </div>
       </div>
 
-      {/* Engagement footer - social metrics */}
       <div className="flex items-center gap-4" style={{ padding:"10px 18px", borderTop:"1px solid rgba(255,255,255,0.04)", background:"rgba(0,0,0,0.2)" }}>
-        <span className="font-body" style={{ fontSize:11, color:C.faint, display:"flex", alignItems:"center", gap:4 }}><Users size={11}/> {watched} watching</span>
-        <span className="font-body" style={{ fontSize:11, color:C.faint, display:"flex", alignItems:"center", gap:4 }}><TrendingUp size={11}/> {backed} backed</span>
+        <span className="font-body" style={{ fontSize:11, color:C.faint, display:"flex", alignItems:"center", gap:4 }}><TrendingUp size={11}/> {predictionCount} real {predictionCount === 1 ? "prediction" : "predictions"} placed</span>
       </div>
     </div>
   );
@@ -486,6 +484,33 @@ export default function OracleLanding({ onLaunch = () => {} }) {
   const [openFaq, setOpenFaq] = useState(null);
   const [lbTab, setLbTab] = useState("ALL");
   const [marketData, setMarketData] = useState(FALLBACK_MARKETS);
+  const [leaderboardData, setLeaderboardData] = useState([]);
+
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      try {
+        setLeaderboardData(await getLeaderboard({ limit: 3 }));
+      } catch (error) {
+        // Marketing preview - an empty board (rendered below) beats showing
+        // fabricated traders as if they were real.
+        setLeaderboardData([]);
+      }
+    };
+    fetchLeaderboard();
+  }, []);
+
+  const [liveMarkets, setLiveMarkets] = useState([]);
+
+  useEffect(() => {
+    const fetchLiveMarkets = async () => {
+      try {
+        setLiveMarkets(await getMarkets({ limit: 3 }));
+      } catch (error) {
+        setLiveMarkets([]);
+      }
+    };
+    fetchLiveMarkets();
+  }, []);
 
   useEffect(() => {
     const fetchMarketData = async () => {
@@ -537,12 +562,6 @@ export default function OracleLanding({ onLaunch = () => {} }) {
     { a: "ADA/USD",  p: formatUsd(marketData.ADA?.price  ?? FALLBACK_MARKETS.ADA.price),  chg: marketData.ADA?.change  ?? FALLBACK_MARKETS.ADA.change },
     { a: "MATIC/USD",p: formatUsd(marketData.MATIC?.price?? FALLBACK_MARKETS.MATIC.price),chg: marketData.MATIC?.change?? FALLBACK_MARKETS.MATIC.change },
   ], [marketData]);
-
-  const leaderboard = [
-    { rank:1, name:"Alpha",  initials:"AL", acc:78, count:91,  bg:"linear-gradient(135deg,rgba(231,184,75,0.12),rgba(0,0,0,0))" },
-    { rank:2, name:"Mide",   initials:"MI", acc:74, count:63,  bg:"transparent" },
-    { rank:3, name:"QuantX", initials:"QU", acc:71, count:118, bg:"transparent" },
-  ];
 
   return (
     <div className="orl-root font-body" style={{ position:"relative", minHeight:"100vh" }}>
@@ -611,11 +630,23 @@ export default function OracleLanding({ onLaunch = () => {} }) {
             headline="Predictions from real traders.<br/>Back them with real trades."
             sub="Every prediction you see is connected to a live DreamDEX Event Contract. The Back button isn't social media engagement. It's a real order."
           />
-          {/* 3-column social feed cards */}
+          {/* 3-column feed cards - real open DreamDEX markets */}
           <div className="feed-grid" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:18 }}>
-            <SocialPredCard user="Mide" initials="MD" acc={74} market="BTC 15M" contractId="OC-BTC-001" dir="UP"   price={marketData.BTC.price} assetAcc={Math.min(98, Math.max(60, 60 + Math.abs(marketData.BTC.change)))} asset="BTC" time="06:42" watched="1,284" backed="312"  onBack={onLaunch} />
-            <SocialPredCard user="AlphaTrader" initials="AT" acc={78} market="ETH 1H"  contractId="OC-ETH-002" dir="DOWN" price={marketData.ETH.price} assetAcc={Math.min(98, Math.max(60, 60 + Math.abs(marketData.ETH.change)))} asset="ETH" time="41:10" watched="876"  backed="195"  onBack={onLaunch} />
-            <SocialPredCard user="QuantX" initials="QX" acc={71} market="BTC 1H"  contractId="OC-BTC-003" dir="UP"   price={marketData.BTC.price} assetAcc={Math.min(98, Math.max(60, 60 + Math.abs(marketData.BTC.change) * 0.8))} asset="BTC" time="22:03" watched="640"  backed="148"  onBack={onLaunch} />
+            {liveMarkets.length > 0 ? liveMarkets.map((m) => (
+              <SocialPredCard
+                key={m.id}
+                market={`${m.asset} ${m.duration}`}
+                dir="UP"
+                asset={m.asset}
+                time={countdownTo(m.closesAt)}
+                upPct={Math.round(m.upPriceCents ?? 50)}
+                downPct={Math.round(m.downPriceCents ?? 50)}
+                predictionCount={m.predictionCount ?? 0}
+                onBack={onLaunch}
+              />
+            )) : (
+              <div className="font-body" style={{ gridColumn:"1 / -1", textAlign:"center", color:C.muted, fontSize:13, padding:"40px 0" }}>Loading live markets…</div>
+            )}
           </div>
           <div className="text-center" style={{ marginTop:40 }}>
             <Btn variant="outline" onClick={onLaunch}>See all live predictions <ArrowRight size={14}/></Btn>
@@ -706,38 +737,31 @@ export default function OracleLanding({ onLaunch = () => {} }) {
               <Btn variant="outline" onClick={onLaunch}>See live battles <ArrowRight size={14}/></Btn>
             </div>
 
-            {/* Right: battle card */}
+            {/* Right: battle card - Battles has no backend support yet (no
+                real matchup/settlement data exists), so this is an
+                explicitly-labeled preview mockup, not a claim that a real
+                battle is live right now. */}
             <div className="battle-glass" style={{ padding:"28px 24px" }}>
               <div className="flex items-center gap-2 justify-center" style={{ marginBottom:22 }}>
-                <LiveDot label="LIVE BATTLE" />
+                <span style={{ fontSize:10, fontWeight:700, letterSpacing:"0.1em", color:C.muted, background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", padding:"4px 10px", borderRadius:999 }}>PREVIEW · COMING SOON</span>
               </div>
               <div className="font-display text-center" style={{ fontSize:20, color:"#fff", fontWeight:700, letterSpacing:"-0.02em", marginBottom:28 }}>BTC 15M</div>
 
               <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:16, alignItems:"center", marginBottom:24 }}>
                 <div style={{ textAlign:"center", padding:"20px 16px", borderRadius:14, background:"rgba(32,229,138,0.06)", border:"1px solid rgba(32,229,138,0.18)" }}>
-                  <Avatar initials="MI" size={44} live />
-                  <div className="font-display" style={{ fontSize:14, color:"#fff", fontWeight:700, margin:"10px 0 8px" }}>Mide</div>
-                  <div className="font-body tnum" style={{ fontSize:11, color:C.muted, marginBottom:10 }}>74% acc</div>
+                  <Avatar initials="A" size={44} />
+                  <div className="font-display" style={{ fontSize:14, color:"#fff", fontWeight:700, margin:"10px 0 8px" }}>Trader A</div>
                   <DirBadge dir="UP" />
                 </div>
                 <div className="font-display" style={{ fontSize:13, color:C.faint, fontWeight:700, letterSpacing:"0.08em" }}>VS</div>
                 <div style={{ textAlign:"center", padding:"20px 16px", borderRadius:14, background:"rgba(255,82,99,0.06)", border:"1px solid rgba(255,82,99,0.18)" }}>
-                  <Avatar initials="AL" size={44} live />
-                  <div className="font-display" style={{ fontSize:14, color:"#fff", fontWeight:700, margin:"10px 0 8px" }}>Alpha</div>
-                  <div className="font-body tnum" style={{ fontSize:11, color:C.muted, marginBottom:10 }}>78% acc</div>
+                  <Avatar initials="B" size={44} />
+                  <div className="font-display" style={{ fontSize:14, color:"#fff", fontWeight:700, margin:"10px 0 8px" }}>Trader B</div>
                   <DirBadge dir="DOWN" />
                 </div>
               </div>
 
-              <div className="text-center font-display tnum" style={{ fontSize:18, color:C.gold, fontWeight:700, marginBottom:20 }}>06:42</div>
-
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
-                <button className="orl-btn" onClick={onLaunch} style={{ width:"100%", border:"none", cursor:"pointer", padding:"13px", borderRadius:10, fontSize:13.5, fontWeight:700, fontFamily:"'Space Grotesk',sans-serif", background:"linear-gradient(135deg,#20E58A,#18C97A)", color:"#04180E" }}>Back Mide</button>
-                <button className="orl-btn" onClick={onLaunch} style={{ width:"100%", border:"none", cursor:"pointer", padding:"13px", borderRadius:10, fontSize:13.5, fontWeight:700, fontFamily:"'Space Grotesk',sans-serif", background:"linear-gradient(135deg,#FF5263,#E03E4E)", color:"#1a0204" }}>Back Alpha</button>
-              </div>
-              <div className="flex justify-center gap-6 font-body" style={{ fontSize:11, color:C.faint }}>
-                <span>1,284 watching</span><span>312 positions taken</span>
-              </div>
+              <Btn variant="outline" onClick={onLaunch} style={{ width:"100%", justifyContent:"center" }}>Try real markets in Predict <ArrowRight size={14}/></Btn>
             </div>
           </div>
         </div>
@@ -766,22 +790,24 @@ export default function OracleLanding({ onLaunch = () => {} }) {
               </div>
 
               <div style={{ borderRadius:18, overflow:"hidden", border:"1px solid rgba(255,255,255,0.07)", background:"rgba(7,9,13,0.7)", backdropFilter:"blur(16px)" }}>
-                {leaderboard.map((r,i) => (
-                  <div key={i} className="lb-row" style={{ padding:"16px 20px", borderBottom:i<2?"1px solid rgba(255,255,255,0.06)":"none", background:r.bg }}>
+                {leaderboardData.length > 0 ? leaderboardData.map((r,i) => (
+                  <div key={r.wallet} className="lb-row" style={{ padding:"16px 20px", borderBottom:i<leaderboardData.length-1?"1px solid rgba(255,255,255,0.06)":"none", background:r.rank===1?"linear-gradient(135deg,rgba(231,184,75,0.12),rgba(0,0,0,0))":"transparent" }}>
                     <div className="flex items-center gap-3">
                       <span className="font-display tnum" style={{ fontSize:13, color:r.rank===1?C.gold:C.faint, fontWeight:700, width:20 }}>#{r.rank}</span>
-                      <Avatar initials={r.initials} size={36} />
+                      <Avatar initials={r.username ? r.username.slice(0,2).toUpperCase() : r.wallet.slice(2,4).toUpperCase()} size={36} />
                       <div>
-                        <div className="font-body" style={{ fontSize:14, color:"#fff", fontWeight:700 }}>{r.name}</div>
-                        <div className="font-body tnum" style={{ fontSize:11, color:C.muted }}>{r.count} predictions</div>
+                        <div className="font-body" style={{ fontSize:14, color:"#fff", fontWeight:700 }}>{r.username || `${r.wallet.slice(0,6)}...${r.wallet.slice(-4)}`}</div>
+                        <div className="font-body tnum" style={{ fontSize:11, color:C.muted }}>{r.totalPredictions} predictions</div>
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-display tnum" style={{ fontSize:18, color:r.rank===1?C.gold:"#fff", fontWeight:700 }}>{r.acc}%</div>
+                      <div className="font-display tnum" style={{ fontSize:18, color:r.rank===1?C.gold:"#fff", fontWeight:700 }}>{Math.round(r.accuracy)}%</div>
                       <div className="font-body" style={{ fontSize:10, color:C.muted }}>accuracy</div>
                     </div>
                   </div>
-                ))}
+                )) : (
+                  <div className="font-body" style={{ padding:"24px 20px", fontSize:13, color:C.muted, textAlign:"center" }}>No predictors on the board yet - be the first.</div>
+                )}
               </div>
 
               <div style={{ marginTop:20 }}>
@@ -799,17 +825,32 @@ export default function OracleLanding({ onLaunch = () => {} }) {
                 Every prediction creates a permanent on-chain record. Your Oracle Score is calculated from resolved predictions, accuracy, and volume. Transparent and publicly verifiable.
               </p>
 
-              {/* Score card preview */}
+              {/* Score card preview - the real #1 leaderboard entry (same
+                  fetch as the leaderboard section above), not a fabricated
+                  persona. Falls back to an honest "not yet claimed" state
+                  rather than inventing a name and stats. */}
               <div style={{ border:"1px solid rgba(255,255,255,0.08)", borderRadius:18, padding:"20px 24px", background:"rgba(7,9,13,0.7)", backdropFilter:"blur(16px)", maxWidth:320 }}>
                 <div className="flex items-center gap-3" style={{ marginBottom:16 }}>
-                  <Avatar initials="MD" size={44} live />
+                  <Avatar initials={leaderboardData[0] ? (leaderboardData[0].username ? leaderboardData[0].username.slice(0,2).toUpperCase() : leaderboardData[0].wallet.slice(2,4).toUpperCase()) : "?"} size={44} live={Boolean(leaderboardData[0])} />
                   <div>
-                    <div className="font-display" style={{ fontSize:18, color:"#fff", fontWeight:700 }}>Mide</div>
-                    <div className="font-body" style={{ fontSize:11, color:C.gold, fontWeight:700, letterSpacing:"0.08em" }}>ELITE PREDICTOR</div>
+                    <div className="font-display" style={{ fontSize:18, color:"#fff", fontWeight:700 }}>
+                      {leaderboardData[0] ? (leaderboardData[0].username || `${leaderboardData[0].wallet.slice(0,6)}...${leaderboardData[0].wallet.slice(-4)}`) : "Unclaimed"}
+                    </div>
+                    <div className="font-body" style={{ fontSize:11, color:C.gold, fontWeight:700, letterSpacing:"0.08em" }}>
+                      {leaderboardData[0] ? "TOP PREDICTOR" : "BE THE FIRST"}
+                    </div>
                   </div>
                 </div>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:0, borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:16 }}>
-                  {[{ v:"82", l:"Score" },{ v:"74%", l:"Accuracy" },{ v:"63", l:"Preds" },{ v:"47", l:"Correct" }].map((s,i) => (
+                  {(leaderboardData[0]
+                    ? [
+                        { v: String(Math.round(leaderboardData[0].predictionScore)), l: "Score" },
+                        { v: `${Math.round(leaderboardData[0].accuracy)}%`, l: "Accuracy" },
+                        { v: String(leaderboardData[0].totalPredictions), l: "Preds" },
+                        { v: String(leaderboardData[0].totalWins), l: "Correct" },
+                      ]
+                    : [{ v:"—", l:"Score" },{ v:"—", l:"Accuracy" },{ v:"—", l:"Preds" },{ v:"—", l:"Correct" }]
+                  ).map((s,i) => (
                     <div key={i} style={{ textAlign:"center", borderRight:i<3?"1px solid rgba(255,255,255,0.06)":"none" }}>
                       <div className="font-display tnum" style={{ fontSize:20, fontWeight:700, color:"#fff", letterSpacing:"-0.02em" }}>{s.v}</div>
                       <div className="font-body" style={{ fontSize:10, color:C.muted, marginTop:3 }}>{s.l}</div>

@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import TradingViewChart, { marketToSymbol, marketToInterval } from "./TradingViewChart";
 import { getLeaderboard, getUserProfile, createPrediction, getAuthChallenge, verifyAuthSignature, setAuthToken, getMarkets } from "../services/api.js";
-import { placeWalletTrade, claimTestnetFunds } from "../services/dreamdexBrowser.js";
+import { placeWalletTrade, claimTestnetFunds, ensureChain, EXPECTED_CHAIN, addTestUsdcToWallet } from "../services/dreamdexBrowser.js";
 
 // Oracle automates minting test tUSDC (DreamDEX's own permissionless
 // faucet), but a wallet still needs native gas already in it to submit that
@@ -644,35 +644,6 @@ function normalizeMarketPrice(asset, liveData) {
   };
 }
 
-const predictor = {
-  name: "Mide",
-  score: 82,
-  accuracy: 74,
-  count: 63,
-  correct: 47,
-  joined: "Jan 2026",
-  specialties: [
-    { market: "BTC 15M", acc: 78 },
-    { market: "BTC 1H", acc: 72 },
-    { market: "ETH 15M", acc: 67 },
-  ],
-  history: [
-    { market: "BTC", dir: "UP", price: 43, result: "win" },
-    { market: "ETH", dir: "DOWN", price: 57, result: "win" },
-    { market: "BTC", dir: "DOWN", price: 61, result: "loss" },
-    { market: "BTC", dir: "UP", price: 48, result: "win" },
-    { market: "SOL", dir: "UP", price: 39, result: "loss" },
-  ],
-};
-
-const leaderboard = [
-  { rank: 1, name: "Alpha", initials: "AL", acc: 78, count: 91 },
-  { rank: 2, name: "Mide", initials: "MI", acc: 74, count: 63 },
-  { rank: 3, name: "QuantX", initials: "QU", acc: 71, count: 118 },
-  { rank: 4, name: "NovaRae", initials: "NR", acc: 65, count: 44 },
-  { rank: 5, name: "Boone", initials: "BO", acc: 61, count: 205 },
-];
-
 function scoreTier(score) {
   if (score >= 80) return "ELITE";
   if (score >= 60) return "SHARP";
@@ -690,14 +661,17 @@ function OracleLogo({ size = 20, color = C.text }) {
   );
 }
 
-/** Only surfaces the two statuses worth interrupting the user for - an
- * action they need to take (needs-gas) or a confirmation something happened
- * (claimed). "already-claimed"/"error"/"claiming" stay silent so this
+/** Surfaces the statuses worth interrupting the user for - an action they
+ * need to take (needs-gas), or a confirmation something happened (claimed /
+ * already-claimed - both mean the wallet actually holds tUSDC now). "error"/
+ * "claiming" stay silent, and attemptFaucetClaim only ever reaches
+ * claimed/already-claimed once per wallet (localStorage-gated), so this
  * doesn't nag on every reconnect. */
-function FaucetBanner({ status, onDismiss }) {
-  if (status !== "needs-gas" && status !== "claimed") return null;
+function FaucetBanner({ status, onDismiss, onAddToken }) {
+  if (status !== "needs-gas" && status !== "claimed" && status !== "already-claimed") return null;
 
   const isNeedsGas = status === "needs-gas";
+  const hasTokens = status === "claimed" || status === "already-claimed";
   return (
     <div
       className="flex items-center justify-between"
@@ -714,7 +688,9 @@ function FaucetBanner({ status, onDismiss }) {
       <span className="font-body" style={{ fontSize: 12.5, color: C.text }}>
         {isNeedsGas
           ? "You'll need a little testnet gas before Oracle can send you test funds."
-          : "You've received test tUSDC — head to Predict to try a trade."}
+          : status === "claimed"
+            ? "You've received test tUSDC — head to Predict to try a trade."
+            : "You already hold test tUSDC — add it to your wallet to see the balance."}
       </span>
       <span className="flex items-center gap-2" style={{ flexShrink: 0 }}>
         {isNeedsGas && (
@@ -727,6 +703,67 @@ function FaucetBanner({ status, onDismiss }) {
           >
             Get testnet gas →
           </a>
+        )}
+        {hasTokens && (
+          // Most wallets only auto-discover a chain's native gas token, not
+          // arbitrary ERC-20s - without this, a real tUSDC balance is
+          // invisible in the wallet's own UI (see the Rabby screenshot: only
+          // STT showed up after a successful faucet claim).
+          <button
+            onClick={onAddToken}
+            className="font-body"
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: C.gold, whiteSpace: "nowrap" }}
+          >
+            + Add tUSDC to wallet
+          </button>
+        )}
+        <button
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4 }}
+        >
+          <XIcon size={14} />
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/** Shown whenever the connected wallet isn't on Somnia testnet - trades and
+ * the faucet both silently trigger a MetaMask switch/add-network prompt
+ * already (see ensureChain), but a wallet can still end up here if the user
+ * dismisses that prompt, or manually flips network afterward. */
+function NetworkBanner({ status, onSwitch, onDismiss }) {
+  if (status !== "wrong" && status !== "switching") return null;
+
+  const isSwitching = status === "switching";
+  return (
+    <div
+      className="flex items-center justify-between"
+      style={{
+        gap: 12,
+        margin: "0 auto 16px",
+        maxWidth: 960,
+        padding: "10px 16px",
+        borderRadius: 10,
+        background: "rgba(255,86,86,0.08)",
+        border: "1px solid rgba(255,86,86,0.25)",
+      }}
+    >
+      <span className="font-body" style={{ fontSize: 12.5, color: C.text }}>
+        {isSwitching
+          ? `Waiting for your wallet to switch to ${EXPECTED_CHAIN.name}…`
+          : `Wrong network — Oracle runs on ${EXPECTED_CHAIN.name}.`}
+      </span>
+      <span className="flex items-center gap-2" style={{ flexShrink: 0 }}>
+        {!isSwitching && (
+          <button
+            onClick={onSwitch}
+            className="font-body"
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: C.gold, whiteSpace: "nowrap" }}
+          >
+            Switch network →
+          </button>
         )}
         <button
           onClick={onDismiss}
@@ -1182,8 +1219,13 @@ function Nav({ view, setView, wallet, walletBalance, signedIn, connectWallet, on
 
 /* ──────────────────── Discover / Feed (social-native) ──────────────────── */
 
+// A real open DreamDEX market, not a fabricated trader's call - there is no
+// "who backed this" data to show (no real per-market social feed exists
+// yet), so this shows the market's own real numbers instead of inventing a
+// user/accuracy/engagement figure to sit next to it.
 function PredictionCard({ p, onOpen, onBack }) {
-  const up = p.dir === "UP";
+  const up = Math.round(p.upPriceCents ?? 50);
+  const down = Math.round(p.downPriceCents ?? (100 - up));
   return (
     <div
       className="pred-card"
@@ -1193,38 +1235,21 @@ function PredictionCard({ p, onOpen, onBack }) {
       onKeyDown={(e) => { if (e.key === "Enter") onOpen(p); }}
       style={{ cursor: "pointer" }}
     >
-      {/* Card header - X/Twitter style with @handle */}
       <div className="flex items-center justify-between" style={{ padding: "16px 18px 12px" }}>
-        <div className="flex items-center gap-2.5">
-          <Avatar initials={p.initials} size={40} live />
-          <div>
-            <div className="font-body" style={{ fontSize: 14, color: C.text, fontWeight: 700 }}>@{p.user}</div>
-            <div className="font-body tnum" style={{ fontSize: 11, color: C.muted }}>{p.userAcc}% overall accuracy</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <LiveDot />
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: C.muted, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)", padding: "3px 8px", borderRadius: 999 }}>
-            {p.contractId}
-          </span>
-        </div>
+        <div className="font-display" style={{ fontSize: 20, color: C.text, fontWeight: 700, letterSpacing: "-0.02em" }}>{p.market}</div>
+        <LiveDot />
       </div>
 
-      {/* Prediction "post" body */}
       <div style={{ padding: "0 18px 0", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-        <div className="flex items-center justify-between" style={{ paddingTop: 14, marginBottom: 8 }}>
-          <div>
-            <div className="font-display" style={{ fontSize: 22, color: C.text, fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 4 }}>{p.market}</div>
-            <div className="font-body" style={{ fontSize: 12.5, color: C.muted }}>{p.question}</div>
-          </div>
-          <DirectionBadge dir={p.dir} />
+        <div style={{ paddingTop: 14, marginBottom: 8 }}>
+          <div className="font-body" style={{ fontSize: 12.5, color: C.muted }}>{p.question}</div>
         </div>
 
-        {/* Stats row - 3 columns with dividers */}
+        {/* Stats row - 3 columns with dividers, all real DreamDEX numbers */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", marginTop: 14, marginBottom: 14, borderTop: "1px solid rgba(255,255,255,0.05)", borderBottom: "1px solid rgba(255,255,255,0.05)", padding: "12px 0" }}>
           {[
-            { label: "DREAMDEX", value: formatUsd(p.price), color: up ? C.up : C.down },
-            { label: p.asset + " ACC.", value: Math.round(p.marketAcc) + "%", color: C.text },
+            { label: "UP", value: `${up}%`, color: C.up },
+            { label: "DOWN", value: `${down}%`, color: C.down },
             { label: "TIME LEFT", value: p.time, color: C.gold },
           ].map((s, i) => (
             <div key={i} style={{ textAlign: "center", borderRight: i < 2 ? "1px solid rgba(255,255,255,0.06)" : "none", padding: "0 4px" }}>
@@ -1234,30 +1259,31 @@ function PredictionCard({ p, onOpen, onBack }) {
           ))}
         </div>
 
-        {/* Back button - full width */}
-        <div style={{ paddingBottom: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, paddingBottom: 14 }}>
           <Button
-            variant={up ? "up" : "down"}
+            variant="up"
             full glow
-            onClick={(e) => { e.stopPropagation(); onBack(p); }}
-            ariaLabel={`Back ${p.dir} on ${p.market}`}
-            style={{ borderRadius: 10, fontSize: 14, padding: "14px 20px" }}
+            onClick={(e) => { e.stopPropagation(); onBack({ ...p, dir: "UP", price: p.upPriceCents ?? 50 }); }}
+            ariaLabel={`Back UP on ${p.market}`}
+            style={{ borderRadius: 10, fontSize: 13, padding: "12px 14px" }}
           >
-            Back {p.dir}
+            Back UP
+          </Button>
+          <Button
+            variant="down"
+            full glow
+            onClick={(e) => { e.stopPropagation(); onBack({ ...p, dir: "DOWN", price: p.downPriceCents ?? 50 }); }}
+            ariaLabel={`Back DOWN on ${p.market}`}
+            style={{ borderRadius: 10, fontSize: 13, padding: "12px 14px" }}
+          >
+            Back DOWN
           </Button>
         </div>
       </div>
 
-      {/* Social engagement footer */}
       <div className="flex items-center gap-4" style={{ padding: "9px 18px", borderTop: "1px solid rgba(255,255,255,0.04)", background: "rgba(0,0,0,0.18)" }}>
         <span className="font-body" style={{ fontSize: 11, color: C.faint, display: "flex", alignItems: "center", gap: 4 }}>
-          <Users size={11} /> {p.watched || "1,284"} watching
-        </span>
-        <span className="font-body" style={{ fontSize: 11, color: C.faint, display: "flex", alignItems: "center", gap: 4 }}>
-          <TrendingUp size={11} /> {p.backed || "312"} backed
-        </span>
-        <span className="font-body" style={{ fontSize: 11, color: C.faint, marginLeft: "auto" }}>
-          {p.time} left
+          <TrendingUp size={11} /> {p.predictionCount ?? 0} real {(p.predictionCount ?? 0) === 1 ? "prediction" : "predictions"} placed
         </span>
       </div>
     </div>
@@ -1392,7 +1418,13 @@ function PredictView({ marketOptions, onSubmit, wallet, connectWallet }) {
       connectWallet();
       return;
     }
-    onSubmit({ market: selected.market, dir, stake, asset: selected.asset, price: selected.price, symbol: selected.symbol, upOutcome: selected.upOutcome });
+    // `order.price` drives both the confirm modal's payout math and the
+    // entryPrice recorded to oracle-backend - both need the contract's own
+    // 0-100 probability for the side being backed, not the asset's dollar
+    // price (selected.price), which would make payout/accuracy nonsense for
+    // any real BTC/ETH market.
+    const price = dir === "UP" ? selected.upPriceCents : selected.downPriceCents;
+    onSubmit({ market: selected.market, dir, stake, asset: selected.asset, price, symbol: selected.symbol, upOutcome: selected.upOutcome });
     setSubmitted(true);
     setTimeout(() => setSubmitted(false), 3000);
   };
@@ -1742,8 +1774,13 @@ function MarketFeedPanels({ asset }) {
 function TradePanel({ market, onBack }) {
   const [amount, setAmount] = useState(10);
   const [side, setSide] = useState("UP");
-  const downPrice = Math.max(1, Number((market.price * 0.96).toFixed(2)));
-  const payout = (amount * (100 / (side === "UP" ? market.price : downPrice))).toFixed(2);
+  // Real DreamDEX probability pricing, not a guessed *0.96 off the UP price
+  // (which also isn't what "UP price" means below - see the upPriceCents
+  // comment in marketOptions) - payout math needs the real 0-100 price for
+  // the side being backed, or it's meaningless for any real market.
+  const upPrice = market.upPriceCents ?? 50;
+  const downPrice = market.downPriceCents ?? 100 - upPrice;
+  const payout = (amount * (100 / (side === "UP" ? upPrice : downPrice))).toFixed(2);
   return (
     <Panel pad={16} style={{ border: `1px solid rgba(255,255,255,0.1)` }}>
       <SectionLabel>Trade</SectionLabel>
@@ -1767,7 +1804,7 @@ function TradePanel({ market, onBack }) {
           aria-pressed={side === "UP"}
         >
           <div className="font-body" style={{ fontSize: 10.5, color: C.up, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 4 }}>UP</div>
-          <PriceDisplay value={market.price} size={20} />
+          <PriceDisplay value={upPrice} unit="%" size={20} />
         </button>
         <button
           onClick={() => setSide("DOWN")}
@@ -1776,7 +1813,7 @@ function TradePanel({ market, onBack }) {
           aria-pressed={side === "DOWN"}
         >
           <div className="font-body" style={{ fontSize: 10.5, color: C.down, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 4 }}>DOWN</div>
-          <PriceDisplay value={downPrice} size={20} />
+          <PriceDisplay value={downPrice} unit="%" size={20} />
         </button>
       </div>
 
@@ -1785,7 +1822,7 @@ function TradePanel({ market, onBack }) {
         <span className="font-display tnum" style={{ fontSize: 15, color: C.gold, fontWeight: 700 }}>${payout}</span>
       </div>
 
-      <Button variant={side === "UP" ? "up" : "down"} full glow onClick={() => onBack({ ...market, dir: side, amount, price: side === "UP" ? market.price : downPrice })}>
+      <Button variant={side === "UP" ? "up" : "down"} full glow onClick={() => onBack({ ...market, dir: side, amount, price: side === "UP" ? upPrice : downPrice })}>
         Back {side}
       </Button>
     </Panel>
@@ -1801,11 +1838,14 @@ function MarketView({ market, onBack }) {
           <div className="flex items-end" style={{ gap: 28, flexWrap: "wrap" }}>
             <div>
               <div className="font-body" style={{ fontSize: 10.5, color: C.up, marginBottom: 4, fontWeight: 700, letterSpacing: "0.08em" }}>UP</div>
-              <PriceDisplay value={market.price} size="clamp(24px, 7vw, 48px)" />
+              {/* DreamDEX's own 0-100 probability pricing, not market.price
+                  (the asset's raw dollar price, shown in the chart below) -
+                  using the dollar price here made DOWN render as negative. */}
+              <PriceDisplay value={market.upPriceCents ?? 50} unit="%" size="clamp(24px, 7vw, 48px)" />
             </div>
             <div>
               <div className="font-body" style={{ fontSize: 10.5, color: C.down, marginBottom: 4, fontWeight: 700, letterSpacing: "0.08em" }}>DOWN</div>
-              <PriceDisplay value={100 - market.price} size="clamp(24px, 7vw, 48px)" />
+              <PriceDisplay value={market.downPriceCents ?? 50} unit="%" size="clamp(24px, 7vw, 48px)" />
             </div>
           </div>
         </div>
@@ -1826,18 +1866,11 @@ function MarketView({ market, onBack }) {
       <MarketFeedPanels asset={market.asset} />
 
       <div style={{ marginBottom: 20 }}>
-        <SectionLabel>What people are predicting</SectionLabel>
-        <div>
-          {[{ user: "Mide", dir: "UP", acc: 78 }, { user: "Alpha", dir: "DOWN", acc: 66 }, { user: "QuantX", dir: "UP", acc: 69 }].map((s, i) => (
-            <div key={i} className="flex items-center justify-between hover-row" style={{ padding: "9px 2px", borderBottom: `1px solid rgba(255,255,255,0.05)` }}>
-              <div className="flex items-center gap-2.5">
-                <Avatar initials={s.user.slice(0, 2).toUpperCase()} size={24} />
-                <span className="font-body" style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{s.user}</span>
-                <span className="font-body tnum" style={{ fontSize: 11.5, color: C.faint }}>{s.acc}%</span>
-              </div>
-              <DirectionBadge dir={s.dir} size="sm" />
-            </div>
-          ))}
+        <SectionLabel>Market activity</SectionLabel>
+        <div className="font-body" style={{ fontSize: 13, color: C.muted, padding: "9px 2px" }}>
+          {market.predictionCount
+            ? `${market.predictionCount} real ${market.predictionCount === 1 ? "prediction has" : "predictions have"} been placed on this market via Oracle.`
+            : "No predictions have been placed on this market yet — be the first."}
         </div>
       </div>
 
@@ -1847,55 +1880,6 @@ function MarketView({ market, onBack }) {
 }
 
 /* ──────────────────── Prediction detail ──────────────────── */
-
-function PredictionDetailView({ p, onOpenMarket, onOpenProfile, onBack }) {
-  const up = p.dir === "UP";
-  return (
-    <div className="container page" style={{ maxWidth: 560 }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: 22 }}>
-        <span className="font-body" style={{ fontSize: 12, color: C.muted }}>{p.market}</span>
-        <span className="font-display tnum" style={{ fontSize: 13, color: C.gold, fontWeight: 700 }}>{p.time}</span>
-      </div>
-
-      <button onClick={() => onOpenProfile(p)} className="flex items-center gap-2.5 link-btn" style={{ background: "none", border: "none", cursor: "pointer", padding: 0, marginBottom: 26 }}>
-        <Avatar initials={p.initials} size={30} live />
-        <span className="font-body" style={{ fontSize: 14, color: C.text, fontWeight: 600 }}>{p.user} predicts</span>
-      </button>
-
-      <Panel style={{ marginBottom: 24 }} pad={24}>
-        <div className="text-center">
-          <div style={{ marginBottom: 10 }}>{up ? <ChevronUp size={26} color={C.up} strokeWidth={2.5} /> : <ChevronDown size={26} color={C.down} strokeWidth={2.5} />}</div>
-          <div className="font-display" style={{ fontSize: 15, color: up ? C.up : C.down, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 12 }}>{p.dir}</div>
-          <div onClick={() => onOpenMarket(p)} style={{ cursor: "pointer", display: "inline-block" }}>
-            <PriceDisplay value={p.price} size={64} />
-          </div>
-        </div>
-      </Panel>
-
-      <Divider />
-
-      <div className="stats-grid" style={{ marginBottom: 26 }}>
-        <Stat label="Score" value={predictor.score} accent={C.gold} />
-        <Stat label="Accuracy" value={p.userAcc + "%"} />
-        <Stat label={p.asset + " Acc."} value={p.marketAcc + "%"} />
-        <Stat label="Predictions" value={predictor.count} />
-      </div>
-
-      <Divider />
-
-      <div style={{ marginBottom: 28 }}>
-        <SectionLabel>Why this matters</SectionLabel>
-        <p className="font-body" style={{ fontSize: 14, color: C.text, lineHeight: 1.65, opacity: 0.82 }}>
-          {p.user} has correctly called {p.market} markets {p.userAcc}% of the time across {predictor.count} predictions.
-        </p>
-      </div>
-
-      <Button variant={up ? "up" : "down"} full glow onClick={() => onBack(p)} style={{ borderRadius: 12, fontSize: 14.5, padding: "15px 20px" }}>
-        Back This Prediction
-      </Button>
-    </div>
-  );
-}
 
 /* ──────────────────── Profile page ──────────────────── */
 
@@ -1951,10 +1935,8 @@ function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt, co
       }
     : {
         // A connected wallet with no backend profile yet is a brand-new
-        // predictor (zero on-chain history), not a stand-in for someone
-        // else's data - `predictor` above is fixture data from before real
-        // profiles existed and must never be shown as if it were the
-        // connected wallet's own record.
+        // predictor (zero on-chain history) - never show fixture/demo data
+        // as if it were the connected wallet's own record.
         name: shortAddress(walletAddress),
         initials: walletAddress.slice(2, 4).toUpperCase(),
         joined: null,
@@ -2288,39 +2270,30 @@ function LeaderboardView({ leaderboardData, leaderboardLoading }) {
 
 /* ──────────────────── Battles ──────────────────── */
 
-function BattleView({ onBack }) {
+// Head-to-head trader battles have no backend support yet (no real matchup,
+// score, or settlement data exists) - this used to fake one (a hardcoded
+// "Mide vs Alpha" card whose "Back" buttons faked a DreamDEX order). Showing
+// that as if it were live was actively misleading, so this is an honest
+// placeholder until battles are a real, backend-backed feature.
+function BattleView() {
   return (
     <div className="container page" style={{ maxWidth: 560 }}>
-      <div className="flex items-center gap-2" style={{ marginBottom: 4, justifyContent: "center" }}>
-        <LiveDot label="LIVE BATTLE" />
-      </div>
-      <h1 className="font-display" style={{ fontSize: 21, color: C.text, fontWeight: 700, marginBottom: 26, textAlign: "center" }}>BTC 15M</h1>
-
-      <Panel pad={24} style={{ marginBottom: 20 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 18 }}>
-          <div className="text-center">
-            <Avatar initials="MD" size={48} live />
-            <div className="font-display" style={{ fontSize: 15, color: C.text, fontWeight: 600, margin: "10px 0 8px" }}>Mide</div>
-            <DirectionBadge dir="UP" />
-          </div>
-          <div className="font-display" style={{ fontSize: 13, color: C.faint, fontWeight: 700, letterSpacing: "0.08em" }}>VS</div>
-          <div className="text-center">
-            <Avatar initials="AL" size={48} live />
-            <div className="font-display" style={{ fontSize: 15, color: C.text, fontWeight: 600, margin: "10px 0 8px" }}>Alpha</div>
-            <DirectionBadge dir="DOWN" />
-          </div>
+      <div className="flex flex-col items-center text-center" style={{ padding: "80px 20px", gap: 16 }}>
+        <div style={{
+          width: 64, height: 64, borderRadius: 999,
+          background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <Flame size={26} color={C.muted} />
         </div>
-        <div className="text-center font-display tnum" style={{ fontSize: 18, color: C.gold, fontWeight: 700, marginTop: 20 }}>06:42</div>
-      </Panel>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
-        <Button variant="up" full glow onClick={() => onBack({ market: "BTC 15M", dir: "UP", user: "Mide", price: 43 })}>Back Mide</Button>
-        <Button variant="down" full glow onClick={() => onBack({ market: "BTC 15M", dir: "DOWN", user: "Alpha", price: 57 })}>Back Alpha</Button>
-      </div>
-
-      <div className="flex items-center justify-center gap-6 font-body tnum" style={{ fontSize: 12, color: C.muted }}>
-        <span className="flex items-center gap-1.5"><Users size={13} /> 1,284 watching</span>
-        <span>312 positions taken</span>
+        <div>
+          <div className="font-display" style={{ fontSize: 20, color: C.text, fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 6 }}>
+            Battles are coming soon
+          </div>
+          <p className="font-body" style={{ fontSize: 13, color: C.muted, maxWidth: 320, lineHeight: 1.6 }}>
+            Head-to-head trader matchups aren't live yet. Check Predict for real, tradeable DreamDEX markets in the meantime.
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -2348,7 +2321,7 @@ function PredictionReceipt({ item, onClose }) {
           <button onClick={onClose} aria-label="Close receipt" style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, flexShrink: 0 }}><XIcon size={16} /></button>
         </div>
 
-        <div className="font-body" style={{ fontSize: "clamp(10px, 1.8vw, 11.5px)", color: C.muted, marginBottom: 4 }}>MIDE PREDICTED</div>
+        <div className="font-body" style={{ fontSize: "clamp(10px, 1.8vw, 11.5px)", color: C.muted, marginBottom: 4 }}>YOU PREDICTED</div>
         <div className="font-display" style={{ fontSize: "clamp(16px, 3vw, 22px)", color: C.text, fontWeight: 700, marginBottom: 16 }}>{item.market} 15M</div>
 
         <div className="flex items-center gap-3" style={{ marginBottom: 18 }}>
@@ -2652,6 +2625,8 @@ export default function OracleDashboard({ onExit }) {
   const [signedIn, setSignedIn] = useState(false);
   // null | "claiming" | "claimed" | "already-claimed" | "needs-gas" | "error"
   const [faucetStatus, setFaucetStatus] = useState(null);
+  // null | "switching" | "wrong"
+  const [networkStatus, setNetworkStatus] = useState(null);
   const [order, setOrder] = useState(null);
   const [orderStatus, setOrderStatus] = useState("confirm");
   const [receipt, setReceipt] = useState(null);
@@ -2734,12 +2709,24 @@ export default function OracleDashboard({ onExit }) {
       setSignedIn(false);
       setAuthToken(null);
       setFaucetStatus(null);
+      setNetworkStatus(null);
       if (!addr) setWalletBalance(null);
       else signInWithWallet(addr, window.ethereum);
     };
 
+    // MetaMask fires this on both a user-initiated switch and one triggered
+    // by our own ensureChain call below - either way, re-check against what
+    // Oracle actually needs rather than assuming a switch means "fixed".
+    const handleChainChanged = (chainIdHex) => {
+      setNetworkStatus(parseInt(chainIdHex, 16) === EXPECTED_CHAIN.id ? null : "wrong");
+    };
+
     provider.on?.("accountsChanged", handleAccountsChanged);
-    return () => provider.removeListener?.("accountsChanged", handleAccountsChanged);
+    provider.on?.("chainChanged", handleChainChanged);
+    return () => {
+      provider.removeListener?.("accountsChanged", handleAccountsChanged);
+      provider.removeListener?.("chainChanged", handleChainChanged);
+    };
   }, []);
 
   useEffect(() => {
@@ -2853,6 +2840,37 @@ export default function OracleDashboard({ onExit }) {
     }
   };
 
+  const handleAddTUsdcToken = async () => {
+    if (!window.ethereum) return;
+    try {
+      await addTestUsdcToWallet(window.ethereum);
+    } catch (err) {
+      // User dismissed the wallet's own "Add token" prompt, or it doesn't
+      // support wallet_watchAsset - nothing to recover from here.
+      console.error("Add tUSDC token failed", err);
+    }
+  };
+
+  // Prompts MetaMask's own switch/add-network dialog right after connecting,
+  // instead of waiting for the first trade or faucet claim to trigger it
+  // (placeWalletTrade/claimTestnetFunds both call the same ensureChain, but
+  // only once the user has already tried to act - by then a stuck wallet
+  // just looks like a failed trade, per the "Trade Not Signed" screenshot).
+  const ensureNetwork = async (provider) => {
+    try {
+      setNetworkStatus("switching");
+      await ensureChain(provider);
+      setNetworkStatus(null);
+      return true;
+    } catch (err) {
+      // User dismissed/rejected the prompt, or the wallet doesn't support
+      // wallet_addEthereumChain - leave the banner up so they can retry.
+      console.error("Network switch failed", err);
+      setNetworkStatus("wrong");
+      return false;
+    }
+  };
+
   // Proves ownership of the connected address to oracle-backend: fetch a
   // one-time nonce, have the wallet sign it, exchange the signature for a
   // JWT. EVM-only (personal_sign) - Phantom (Solana) is skipped since
@@ -2888,7 +2906,10 @@ export default function OracleDashboard({ onExit }) {
         setWallet(accounts?.[0] ? shortAddress(accounts[0]) : null);
         setWalletAddress(accounts?.[0] || null);
         setWalletModalOpen(false);
-        if (accounts?.[0]) await signInWithWallet(accounts[0], window.ethereum);
+        if (accounts?.[0]) {
+          await ensureNetwork(window.ethereum);
+          await signInWithWallet(accounts[0], window.ethereum);
+        }
       } else if (type === "phantom") {
         const phantom = window.phantom?.solana || window.solana;
         if (!phantom?.isPhantom) {
@@ -2908,7 +2929,10 @@ export default function OracleDashboard({ onExit }) {
         setWallet(accounts?.[0] ? shortAddress(accounts[0]) : null);
         setWalletAddress(accounts?.[0] || null);
         setWalletModalOpen(false);
-        if (accounts?.[0]) await signInWithWallet(accounts[0], cbProvider);
+        if (accounts?.[0]) {
+          await ensureNetwork(cbProvider);
+          await signInWithWallet(accounts[0], cbProvider);
+        }
       } else if (type === "walletconnect") {
         // WalletConnect v2 deeplink - opens the QR/deeplink flow
         window.open("https://walletconnect.com/", "_blank");
@@ -2919,9 +2943,7 @@ export default function OracleDashboard({ onExit }) {
     }
   };
 
-  const openDetail = (p) => { setDetail(p); setView("detail"); };
   const openMarket = (p) => { setDetail(p); setView("market"); };
-  const openProfile = () => setView("profile");
   const openOrder = (o) => { setOrder(o); setOrderStatus("confirm"); };
 
   // `order.symbol` only exists on orders built from real DreamDEX markets
@@ -2971,6 +2993,16 @@ export default function OracleDashboard({ onExit }) {
       // but our own bookkeeping failed" below.
       console.error("On-chain trade failed:", error);
       setOrderStatus("chain-error");
+      // placeWalletTrade already tried its own switch/add-network prompt
+      // (via ensureChain) before ever getting to the signature step - if
+      // that's why this failed, surface the persistent top banner too, not
+      // just this modal's one-off retry button.
+      try {
+        const hex = await window.ethereum?.request({ method: "eth_chainId" });
+        if (hex && parseInt(hex, 16) !== EXPECTED_CHAIN.id) setNetworkStatus("wrong");
+      } catch {
+        // Can't read the chain - leave networkStatus as-is.
+      }
       return;
     }
 
@@ -3021,11 +3053,11 @@ export default function OracleDashboard({ onExit }) {
       const eth = normalizeMarketPrice("ETH", liveMarketData);
       const sol = normalizeMarketPrice("SOL", liveMarketData);
       return [
-        { id: "btc15", market: "BTC 15M", asset: "BTC", question: "Will BTC finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: btc.price },
-        { id: "btc1h", market: "BTC 1H", asset: "BTC", question: "Will BTC finish higher in the next hour?", time: makeLiveCountdown(), price: btc.price },
-        { id: "eth15", market: "ETH 15M", asset: "ETH", question: "Will ETH finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: eth.price },
-        { id: "eth1h", market: "ETH 1H", asset: "ETH", question: "Will ETH finish higher in the next hour?", time: makeLiveCountdown(), price: eth.price },
-        { id: "sol15", market: "SOL 15M", asset: "SOL", question: "Will SOL finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: sol.price },
+        { id: "btc15", market: "BTC 15M", asset: "BTC", question: "Will BTC finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: btc.price, upPriceCents: 50, downPriceCents: 50, predictionCount: 0 },
+        { id: "btc1h", market: "BTC 1H", asset: "BTC", question: "Will BTC finish higher in the next hour?", time: makeLiveCountdown(), price: btc.price, upPriceCents: 50, downPriceCents: 50, predictionCount: 0 },
+        { id: "eth15", market: "ETH 15M", asset: "ETH", question: "Will ETH finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: eth.price, upPriceCents: 50, downPriceCents: 50, predictionCount: 0 },
+        { id: "eth1h", market: "ETH 1H", asset: "ETH", question: "Will ETH finish higher in the next hour?", time: makeLiveCountdown(), price: eth.price, upPriceCents: 50, downPriceCents: 50, predictionCount: 0 },
+        { id: "sol15", market: "SOL 15M", asset: "SOL", question: "Will SOL finish higher in the next 15 minutes?", time: makeLiveCountdown(), price: sol.price, upPriceCents: 50, downPriceCents: 50, predictionCount: 0 },
       ];
     }
 
@@ -3035,42 +3067,39 @@ export default function OracleDashboard({ onExit }) {
       asset: m.asset,
       question: `Will ${m.asset} finish higher in the next ${DURATION_LABELS[m.duration] ?? m.duration}?`,
       time: countdownTo(m.closesAt),
+      // The asset's real dollar price, for the chart header - NOT the
+      // contract's own price, which is a 0-100 probability (see below).
       price: normalizeMarketPrice(m.asset, liveMarketData).price,
+      // DreamDEX's own UP/DOWN probability pricing (0-100) - this, not the
+      // asset's dollar price, is what payout math and entryPrice recording
+      // must use (a $67,000 BTC price fed into `amount * (100/price)` or
+      // recorded as entryPrice produces nonsense for any real market).
+      upPriceCents: m.upPriceCents ?? 50,
+      downPriceCents: m.downPriceCents ?? 50,
+      predictionCount: m.predictionCount ?? 0,
       // Needed by the wallet-signed trade call, not for display.
       symbol: m.dreamdexMarketId,
       upOutcome: m.upOutcome,
     }));
   }, [dreamdexMarkets, liveMarketData]);
 
-  const predictions = useMemo(() => {
-    const btc = normalizeMarketPrice("BTC", liveMarketData);
-    const eth = normalizeMarketPrice("ETH", liveMarketData);
-    const sol = normalizeMarketPrice("SOL", liveMarketData);
-    const now = makeLiveCountdown();
-
-    return [
-      { id: 1, user: "Mide", initials: "MD", market: "BTC 15M", contractId: "OC-BTC-001", asset: "BTC", dir: "UP", price: btc.realPrice, userAcc: 74, marketAcc: Math.min(99, Math.max(60, 60 + Math.abs(btc.change))), time: now, question: "Will BTC finish higher?", watched: "1,284", backed: "312" },
-      { id: 2, user: "AlphaTrader", initials: "AT", market: "ETH 1H", contractId: "OC-ETH-002", asset: "ETH", dir: "DOWN", price: eth.realPrice, userAcc: 78, marketAcc: Math.min(99, Math.max(60, 60 + Math.abs(eth.change))), time: makeLiveCountdown(), question: "Will ETH finish higher?", watched: "876", backed: "195" },
-      { id: 3, user: "QuantX", initials: "QX", market: "BTC 1H", contractId: "OC-BTC-003", asset: "BTC", dir: "UP", price: btc.realPrice, userAcc: 71, marketAcc: Math.min(99, Math.max(60, 60 + Math.abs(btc.change) * 0.8)), time: makeLiveCountdown(), question: "Will BTC finish higher?", watched: "640", backed: "148" },
-      { id: 4, user: "NovaRae", initials: "NR", market: "SOL 15M", contractId: "OC-SOL-004", asset: "SOL", dir: "DOWN", price: sol.realPrice, userAcc: 65, marketAcc: Math.min(99, Math.max(55, 55 + Math.abs(sol.change))), time: makeLiveCountdown(), question: "Will SOL finish higher?", watched: "412", backed: "94" },
-    ];
-  }, [liveMarketData]);
+  // Discover feed: real open DreamDEX markets, not fabricated traders' calls
+  // - there is no backend concept of "a specific trader's specific call" to
+  // show here, so this shows the market itself (real price split, real
+  // predictionCount) rather than inventing a user/accuracy/engagement number
+  // to sit next to it.
+  const predictions = marketOptions;
 
   const marketFocus = predictions[0] || {
-    id: 1,
-    user: "Mide",
-    initials: "MD",
+    id: "btc15",
     market: "BTC 15M",
-    contractId: "OC-BTC-001",
     asset: "BTC",
-    dir: "UP",
-    price: normalizeMarketPrice("BTC", liveMarketData).price,
-    userAcc: 74,
-    marketAcc: 77,
+    question: "Will BTC finish higher in the next 15 minutes?",
     time: makeLiveCountdown(),
-    question: "Will BTC finish higher?",
-    watched: "1,284",
-    backed: "312",
+    price: normalizeMarketPrice("BTC", liveMarketData).price,
+    upPriceCents: 50,
+    downPriceCents: 50,
+    predictionCount: 0,
   };
 
   const bgImage = "/spheres-bg.png";
@@ -3128,12 +3157,18 @@ export default function OracleDashboard({ onExit }) {
           tickerData={tickerData}
         />
 
-        <FaucetBanner status={faucetStatus} onDismiss={() => setFaucetStatus(null)} />
+        {walletAddress && (
+          <NetworkBanner
+            status={networkStatus}
+            onSwitch={() => ensureNetwork(window.ethereum)}
+            onDismiss={() => setNetworkStatus(null)}
+          />
+        )}
+        <FaucetBanner status={faucetStatus} onDismiss={() => setFaucetStatus(null)} onAddToken={handleAddTUsdcToken} />
 
-        {view === "feed" && <FeedView predictions={predictions} onOpen={openDetail} onBack={openOrder} />}
+        {view === "feed" && <FeedView predictions={predictions} onOpen={openMarket} onBack={openOrder} />}
         {view === "market" && <MarketView market={detail || marketFocus} onBack={openOrder} />}
         {view === "predict" && <PredictView marketOptions={marketOptions} onSubmit={openOrder} wallet={wallet} connectWallet={connectWallet} />}
-        {view === "detail" && detail && <PredictionDetailView p={detail} onOpenMarket={openMarket} onOpenProfile={openProfile} onBack={openOrder} />}
         {view === "profile" && (
           <ProfileView
             profile={userProfileData}
@@ -3144,7 +3179,7 @@ export default function OracleDashboard({ onExit }) {
           />
         )}
         {view === "leaderboard" && <LeaderboardView leaderboardData={leaderboardData} leaderboardLoading={leaderboardLoading} />}
-        {view === "battle" && <BattleView onBack={openOrder} />}
+        {view === "battle" && <BattleView />}
       </div>
 
       <TradeModal order={order} status={orderStatus} onClose={() => setOrder(null)} onConfirm={confirmOrder} onRetry={retryOrder} />
