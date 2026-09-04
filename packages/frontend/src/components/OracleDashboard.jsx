@@ -21,7 +21,16 @@ import {
 } from "lucide-react";
 import TradingViewChart, { marketToSymbol, marketToInterval } from "./TradingViewChart";
 import { getLeaderboard, getUserProfile, createPrediction, getAuthChallenge, verifyAuthSignature, setAuthToken, getMarkets } from "../services/api.js";
-import { placeWalletTrade } from "../services/dreamdexBrowser.js";
+import { placeWalletTrade, claimTestnetFunds } from "../services/dreamdexBrowser.js";
+
+// Oracle automates minting test tUSDC (DreamDEX's own permissionless
+// faucet), but a wallet still needs native gas already in it to submit that
+// transaction - that's a separate, real-value-adjacent faucet Oracle
+// deliberately doesn't automate. Point users at Google Cloud's instead.
+const SOMNIA_GAS_FAUCET_URL = "https://cloud.google.com/application/web3/faucet/somnia/shannon";
+// Comfortably covers one faucet() call's gas on Somnia testnet without being
+// so low that a near-empty wallet still fails mid-claim.
+const MIN_NATIVE_FOR_FAUCET_CLAIM = 0.01;
 
 /* ================================================================== *
  *  ORACLE - product dashboard (premium redesign)
@@ -678,6 +687,56 @@ function OracleLogo({ size = 20, color = C.text }) {
       <circle cx="12" cy="12" r="9" stroke={color} strokeWidth="1.6" />
       <circle cx="12" cy="7.6" r="2.1" fill={color} />
     </svg>
+  );
+}
+
+/** Only surfaces the two statuses worth interrupting the user for - an
+ * action they need to take (needs-gas) or a confirmation something happened
+ * (claimed). "already-claimed"/"error"/"claiming" stay silent so this
+ * doesn't nag on every reconnect. */
+function FaucetBanner({ status, onDismiss }) {
+  if (status !== "needs-gas" && status !== "claimed") return null;
+
+  const isNeedsGas = status === "needs-gas";
+  return (
+    <div
+      className="flex items-center justify-between"
+      style={{
+        gap: 12,
+        margin: "0 auto 16px",
+        maxWidth: 960,
+        padding: "10px 16px",
+        borderRadius: 10,
+        background: isNeedsGas ? "rgba(255,184,0,0.08)" : "rgba(32,229,138,0.08)",
+        border: `1px solid ${isNeedsGas ? "rgba(255,184,0,0.25)" : "rgba(32,229,138,0.25)"}`,
+      }}
+    >
+      <span className="font-body" style={{ fontSize: 12.5, color: C.text }}>
+        {isNeedsGas
+          ? "You'll need a little testnet gas before Oracle can send you test funds."
+          : "You've received test tUSDC — head to Predict to try a trade."}
+      </span>
+      <span className="flex items-center gap-2" style={{ flexShrink: 0 }}>
+        {isNeedsGas && (
+          <a
+            href={SOMNIA_GAS_FAUCET_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-body"
+            style={{ fontSize: 12.5, fontWeight: 700, color: C.gold, whiteSpace: "nowrap" }}
+          >
+            Get testnet gas →
+          </a>
+        )}
+        <button
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4 }}
+        >
+          <XIcon size={14} />
+        </button>
+      </span>
+    </div>
   );
 }
 
@@ -1890,7 +1949,22 @@ function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt, co
           result: h.result === "WON" ? "win" : "loss",
         })),
       }
-    : { ...predictor, initials: "MD" };
+    : {
+        // A connected wallet with no backend profile yet is a brand-new
+        // predictor (zero on-chain history), not a stand-in for someone
+        // else's data - `predictor` above is fixture data from before real
+        // profiles existed and must never be shown as if it were the
+        // connected wallet's own record.
+        name: shortAddress(walletAddress),
+        initials: walletAddress.slice(2, 4).toUpperCase(),
+        joined: null,
+        score: 0,
+        accuracy: 0,
+        count: 0,
+        correct: 0,
+        specialties: [],
+        history: [],
+      };
 
   if (profileLoading && !profile) {
     return (
@@ -2576,6 +2650,8 @@ export default function OracleDashboard({ onExit }) {
   const [walletBalance, setWalletBalance] = useState(null);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  // null | "claiming" | "claimed" | "already-claimed" | "needs-gas" | "error"
+  const [faucetStatus, setFaucetStatus] = useState(null);
   const [order, setOrder] = useState(null);
   const [orderStatus, setOrderStatus] = useState("confirm");
   const [receipt, setReceipt] = useState(null);
@@ -2657,6 +2733,7 @@ export default function OracleDashboard({ onExit }) {
       setWalletAddress(addr);
       setSignedIn(false);
       setAuthToken(null);
+      setFaucetStatus(null);
       if (!addr) setWalletBalance(null);
       else signInWithWallet(addr, window.ethereum);
     };
@@ -2745,6 +2822,37 @@ export default function OracleDashboard({ onExit }) {
     try { localStorage.setItem("oracle_onboarded", "1"); } catch { /* private browsing — non-fatal */ }
   };
 
+  // Claims test tUSDC for a newly-connected wallet, once, automatically.
+  // Only runs after sign-in (a real signature already proved the user
+  // controls this address) so this never fires for an address someone
+  // merely typed in or spoofed via eth_requestAccounts.
+  const attemptFaucetClaim = async (address) => {
+    const claimedKey = `oracle:faucetClaimed:${address.toLowerCase()}`;
+    try {
+      if (localStorage.getItem(claimedKey)) return;
+    } catch {
+      // Private browsing — fall through and just try; worst case the
+      // contract's own cap makes a repeat attempt a harmless no-op.
+    }
+
+    try {
+      const hex = await window.ethereum.request({ method: "eth_getBalance", params: [address, "latest"] });
+      const nativeBalance = Number(BigInt(hex)) / 1e18;
+      if (nativeBalance < MIN_NATIVE_FOR_FAUCET_CLAIM) {
+        setFaucetStatus("needs-gas");
+        return;
+      }
+
+      setFaucetStatus("claiming");
+      const result = await claimTestnetFunds(address);
+      try { localStorage.setItem(claimedKey, "1"); } catch { /* non-fatal */ }
+      setFaucetStatus(result.status);
+    } catch (err) {
+      console.error("Automatic faucet claim failed", err);
+      setFaucetStatus("error");
+    }
+  };
+
   // Proves ownership of the connected address to oracle-backend: fetch a
   // one-time nonce, have the wallet sign it, exchange the signature for a
   // JWT. EVM-only (personal_sign) - Phantom (Solana) is skipped since
@@ -2759,6 +2867,7 @@ export default function OracleDashboard({ onExit }) {
       });
       await verifyAuthSignature({ walletAddress: address, nonce, signature });
       setSignedIn(true);
+      void attemptFaucetClaim(address);
     } catch (err) {
       // User rejected the signature, or the backend is unreachable - stay
       // connected but unsigned; predictions fall back to unsigned writes
@@ -3018,6 +3127,8 @@ export default function OracleDashboard({ onExit }) {
           onExit={onExit}
           tickerData={tickerData}
         />
+
+        <FaucetBanner status={faucetStatus} onDismiss={() => setFaucetStatus(null)} />
 
         {view === "feed" && <FeedView predictions={predictions} onOpen={openDetail} onBack={openOrder} />}
         {view === "market" && <MarketView market={detail || marketFocus} onBack={openOrder} />}

@@ -13,3 +13,4 @@ export { subscribeFills, type FillSubscription } from "./fills.js";
 export { getSettlement, watchSettlement, type SettlementResult, type SettlementSubscription } from "./settlement.js";
 export { getOrder, cancelOrderById } from "./orders.js";
 export { redeemPosition, type RedeemArgs } from "./redeem.js";
+export { claimTestFunds, type ClaimTestFundsArgs } from "./faucet.js";

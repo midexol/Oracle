@@ -10,6 +10,7 @@
 import { createWalletClient, custom, type EIP1193Provider } from "viem";
 import {
   backPrediction,
+  claimTestFunds,
   closeExchange,
   createExchange,
   loadConfig,
@@ -66,6 +67,22 @@ export interface WalletTradeParams {
   upOutcome?: "YES" | "NO";
 }
 
+/** Builds a signer-bound exchange over the connected browser wallet, switching it to Somnia testnet if needed. */
+async function buildExchange(address: `0x${string}`) {
+  const provider = window.ethereum as EIP1193Provider | undefined;
+  if (!provider) throw new Error("No wallet provider found");
+
+  const chain = await ensureChain(provider);
+
+  const walletClient = createWalletClient({
+    account: address,
+    chain,
+    transport: custom(provider),
+  });
+
+  return createExchange({ walletClient });
+}
+
 /**
  * Builds a viem WalletClient over the connected browser wallet, switches it
  * to Somnia testnet if needed, and submits a real market order. Every step
@@ -79,18 +96,7 @@ export async function placeWalletTrade({
   usdStake,
   upOutcome,
 }: WalletTradeParams) {
-  const provider = window.ethereum as EIP1193Provider | undefined;
-  if (!provider) throw new Error("No wallet provider found");
-
-  const chain = await ensureChain(provider);
-
-  const walletClient = createWalletClient({
-    account: address,
-    chain,
-    transport: custom(provider),
-  });
-
-  const exchange = createExchange({ walletClient });
+  const exchange = await buildExchange(address);
   try {
     return await backPrediction(exchange, {
       symbol,
@@ -99,6 +105,36 @@ export async function placeWalletTrade({
       upOutcome,
       dryRun: false,
     });
+  } finally {
+    await closeExchange(exchange);
+  }
+}
+
+export type FaucetClaimResult = { status: "claimed"; txHash: string } | { status: "already-claimed" };
+
+/**
+ * Mints test tUSDC to the connected wallet via TestUSDC's own permissionless
+ * faucet() - mint-to-self only, so this never touches funds on Oracle's
+ * behalf. The contract enforces its own per-address cap (reverts with
+ * FaucetCapExceeded), which is treated as a normal, expected outcome rather
+ * than an error - most repeat callers will hit it.
+ *
+ * Still a real signed transaction: the wallet will prompt once, and it needs
+ * native gas already in the wallet to submit (see the Somnia faucet link in
+ * the UI for that - Oracle only automates the token side).
+ */
+export async function claimTestnetFunds(address: `0x${string}`): Promise<FaucetClaimResult> {
+  const exchange = await buildExchange(address);
+  try {
+    const result = await claimTestFunds(exchange);
+    return { status: "claimed", txHash: result.hash };
+  } catch (err: any) {
+    const chain = [err, err?.cause, err?.cause?.cause, err?.cause?.cause?.cause];
+    const alreadyClaimed = chain.some(
+      (e) => typeof e?.message === "string" && e.message.includes("FaucetCapExceeded"),
+    );
+    if (alreadyClaimed) return { status: "already-claimed" };
+    throw err;
   } finally {
     await closeExchange(exchange);
   }
