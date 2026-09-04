@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, gt, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, gt, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { markets, marketPriceSnapshots, predictions, users, userSegmentStats } from '../../db/schema/index.js';
 import { getDreamDexClient } from '../../dreamdex/index.js';
@@ -89,7 +89,24 @@ export interface MarketFilters {
 
 export async function listMarkets(filters: MarketFilters = {}) {
   const conditions: SQL[] = [];
-  if (filters.status?.length) conditions.push(inArray(markets.status, filters.status));
+  if (filters.status?.length) {
+    // A market's `status` column only flips once the resolver processes it,
+    // which can lag well behind its real on-chain closesAt (e.g. after a
+    // period where discovery stalled and a backlog built up) - so "OPEN"
+    // in the DB is not sufficient proof a market is still tradeable. Gate
+    // OPEN specifically on closesAt still being in the future; other
+    // statuses are historical and unaffected by this.
+    const wantsOpen = filters.status.includes('OPEN');
+    const otherStatuses = filters.status.filter((s) => s !== 'OPEN');
+    conditions.push(
+      wantsOpen
+        ? or(
+            and(eq(markets.status, 'OPEN'), gt(markets.closesAt, new Date())),
+            ...(otherStatuses.length ? [inArray(markets.status, otherStatuses)] : []),
+          )!
+        : inArray(markets.status, filters.status),
+    );
+  }
   if (filters.asset) conditions.push(eq(markets.asset, filters.asset));
   if (filters.duration) conditions.push(eq(markets.duration, filters.duration));
 

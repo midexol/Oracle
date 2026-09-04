@@ -89,8 +89,16 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   return results;
 }
 
-export async function listEventContracts(exchange: SomniaMarkets): Promise<EventContract[]> {
-  await exchange.loadMarkets();
+export async function listEventContracts(
+  exchange: SomniaMarkets,
+  opts?: { reload?: boolean },
+): Promise<EventContract[]> {
+  // loadMarkets() only fetches once per exchange instance unless told to
+  // reload - a long-lived server-side exchange (see client.ts) must force
+  // this periodically or it never sees a market created after process boot,
+  // and the market list it serves goes stale (and untradeable) within
+  // minutes since DreamDEX opens new short-duration series constantly.
+  await exchange.loadMarkets(opts?.reload ?? false);
   const nowSec = Math.floor(Date.now() / 1000);
   const binaryMarkets = Object.values(exchange.markets).filter(
     (m) => m.type === "binary" && TRACKED_ASSETS.has(assetOf(m.base)) && isRelevant(m, nowSec),

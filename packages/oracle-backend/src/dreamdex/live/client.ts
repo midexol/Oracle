@@ -305,7 +305,14 @@ export class LiveDreamDexClient implements DreamDexClient {
   /** Find newly-opened contracts and attach book + settlement watchers. */
   private async discover(): Promise<void> {
     const exchange = this.requireExchange();
-    const contracts = await listEventContracts(exchange);
+    // Force a registry reload every cycle - loadMarkets() only fetches once
+    // per exchange instance by default, and this exchange lives for the
+    // whole process. Without this, any market opened after boot is
+    // invisible forever: the market list goes stale within minutes (Oracle
+    // only tracks short-duration BTC/ETH series) and every symbol we serve
+    // to the frontend eventually points at an already-closed market that
+    // can no longer be traded.
+    const contracts = await listEventContracts(exchange, { reload: true });
     this.contracts = new Map(contracts.map((c) => [c.symbol, c]));
     this.contractsFetchedAt = Date.now();
 
