@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   ChevronUp,
   ChevronDown,
@@ -16,11 +16,10 @@ import {
   Clock,
   TrendingUp,
   User,
-  ArrowLeft,
   Target,
 } from "lucide-react";
 import TradingViewChart, { marketToSymbol, marketToInterval } from "./TradingViewChart";
-import { getLeaderboard, getUserProfile, createPrediction, getAuthChallenge, verifyAuthSignature, setAuthToken, getMarkets } from "../services/api.js";
+import { getLeaderboard, getUserProfile, createPrediction, getAuthChallenge, verifyAuthSignature, setAuthToken, setAuthWallet, getAuthToken, getAuthWallet, getMarkets } from "../services/api.js";
 import { placeWalletTrade, claimTestnetFunds, ensureChain, EXPECTED_CHAIN, addTestUsdcToWallet } from "../services/dreamdexBrowser.js";
 
 // Oracle automates minting test tUSDC (DreamDEX's own permissionless
@@ -999,7 +998,7 @@ function TickerStrip({ tickerData }) {
 
 /* ──────────────────── Nav (image 8 style pill tabs) ──────────────────── */
 
-function Nav({ view, setView, wallet, walletBalance, signedIn, connectWallet, onExit, tickerData }) {
+function Nav({ view, setView, wallet, walletBalance, signedIn, connectWallet, tickerData }) {
   const items = [
     ["feed", "Discover"],
     ["market", "Markets"],
@@ -1085,16 +1084,6 @@ function Nav({ view, setView, wallet, walletBalance, signedIn, connectWallet, on
               <span className="flex items-center gap-2"><Wallet size={13} /> Connect</span>
             </Button>
           )}
-          {onExit && (
-            <button
-              onClick={onExit}
-              className="font-body link-btn"
-              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: C.muted, display: "flex", alignItems: "center", gap: 5, padding: "8px 10px" }}
-              aria-label="Back to site"
-            >
-              <ArrowLeft size={14} strokeWidth={2} /> Back to site
-            </button>
-          )}
         </div>
       </aside>
 
@@ -1106,18 +1095,8 @@ function Nav({ view, setView, wallet, walletBalance, signedIn, connectWallet, on
         borderBottom: "1px solid rgba(255,255,255,0.06)",
       }}>
       <div className="app-topbar-row container flex items-center justify-between" style={{ height: 62 }}>
-        {/* Left: logo + back */}
+        {/* Left: logo */}
         <div className="flex items-center" style={{ gap: 20 }}>
-          {onExit && (
-            <button
-              onClick={onExit}
-              className="font-body link-btn"
-              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: C.muted, display: "flex", alignItems: "center", gap: 5 }}
-              aria-label="Back to site"
-            >
-              <ArrowLeft size={14} strokeWidth={2} /> Site
-            </button>
-          )}
           <button
             onClick={() => setView("feed")}
             className="flex items-center gap-2 link-btn"
@@ -1932,6 +1911,16 @@ function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt, co
           price: h.price,
           result: h.result === "WON" ? "win" : "loss",
         })),
+        // A market can take up to its own duration (1H/4H) to settle - until
+        // then a real, already-submitted prediction only lives here. Without
+        // this, a fresh trade was invisible everywhere in the product (not
+        // in history, not counted anywhere) and looked like it never happened.
+        pending: (profile.pending || []).map((p) => ({
+          market: p.market,
+          dir: p.dir,
+          price: p.price,
+          closesAt: p.closesAt,
+        })),
       }
     : {
         // A connected wallet with no backend profile yet is a brand-new
@@ -1946,6 +1935,7 @@ function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt, co
         correct: 0,
         specialties: [],
         history: [],
+        pending: [],
       };
 
   if (profileLoading && !profile) {
@@ -2050,6 +2040,49 @@ function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt, co
 
       {/* Tab content */}
       {activeTab === "history" && (
+        <>
+        {view.pending.length > 0 && (
+          <Panel pad={0} style={{ marginBottom: 14 }}>
+            <div style={{ padding: "16px 18px 6px" }}>
+              <SectionLabel>Open Positions</SectionLabel>
+            </div>
+            {view.pending.map((p, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between"
+                style={{
+                  padding: "14px 18px",
+                  borderTop: i === 0 ? "none" : `1px solid rgba(255,255,255,0.05)`,
+                }}
+              >
+                <div className="flex items-center gap-3">
+                  <div style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    background: "rgba(224,228,236,0.08)",
+                    border: "1px solid rgba(224,228,236,0.2)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <Clock size={14} color={C.gold} />
+                  </div>
+                  <div>
+                    <div className="font-body" style={{ fontSize: 13.5, color: C.text, fontWeight: 600 }}>{p.market}</div>
+                    <DirectionBadge dir={p.dir} size="sm" />
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="font-body" style={{
+                    fontSize: 11.5, fontWeight: 700, padding: "4px 10px", borderRadius: 6,
+                    color: C.gold, background: C.goldSoft,
+                    border: "1px solid rgba(224,228,236,0.3)",
+                  }}>
+                    PENDING
+                  </span>
+                  <div className="font-body tnum" style={{ fontSize: 11, color: C.faint, marginTop: 4 }}>${Number(p.price).toFixed(2)}</div>
+                </div>
+              </div>
+            ))}
+          </Panel>
+        )}
         <Panel pad={0}>
           <div style={{ padding: "16px 18px 6px" }}>
             <SectionLabel>Prediction History</SectionLabel>
@@ -2098,6 +2131,7 @@ function ProfileView({ profile, profileLoading, walletAddress, onOpenReceipt, co
             );
           })}
         </Panel>
+        </>
       )}
 
       {activeTab === "specialties" && (
@@ -2343,7 +2377,7 @@ function PredictionReceipt({ item, onClose }) {
   );
 }
 
-function TradeModal({ order, onClose, status, onConfirm, onRetry }) {
+function TradeModal({ order, onClose, status, resultKind, onConfirm, onRetry }) {
   if (!order) return null;
   const up = order.dir === "UP";
   const amount = order.amount || 10;
@@ -2407,9 +2441,13 @@ function TradeModal({ order, onClose, status, onConfirm, onRetry }) {
             <div style={{ width: 52, height: 52, borderRadius: 999, background: C.upSoft, border: `1px solid ${C.upBorder}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: `0 0 20px rgba(32,229,138,0.25)` }}>
               <Check size={22} color={C.up} strokeWidth={2.5} />
             </div>
-            <div className="font-display" style={{ fontSize: "clamp(14px, 2.5vw, 16px)", color: C.text, fontWeight: 700, marginBottom: 6 }}>Position Confirmed</div>
+            <div className="font-display" style={{ fontSize: "clamp(14px, 2.5vw, 16px)", color: C.text, fontWeight: 700, marginBottom: 6 }}>{resultKind === "onchain" ? "Position Confirmed" : "Prediction Saved"}</div>
             <div className="font-body tnum" style={{ fontSize: "clamp(11px, 1.8vw, 12px)", color: C.muted, marginBottom: 4 }}>${amount} on {order.dir} · {order.market}</div>
-            <div className="font-body" style={{ fontSize: "clamp(10px, 1.8vw, 11px)", color: C.faint, marginBottom: 20 }}>DreamDEX order submitted</div>
+            <div className="font-body" style={{ fontSize: "clamp(10px, 1.8vw, 11px)", color: C.faint, marginBottom: 20 }}>
+              {resultKind === "onchain"
+                ? "DreamDEX order submitted"
+                : "Saved to your Oracle profile — sign in with your wallet to back this on-chain"}
+            </div>
             <Button variant="ghost" full onClick={onClose} style={{ minHeight: 44 }}>Close</Button>
           </div>
         )}
@@ -2612,7 +2650,7 @@ function OnboardingScreen({ wallet, connectWallet, onContinue, onSkip }) {
 
 /* ──────────────────── Dashboard root ──────────────────── */
 
-export default function OracleDashboard({ onExit }) {
+export default function OracleDashboard() {
   const [onboarded, setOnboarded] = useState(() => {
     try { return localStorage.getItem("oracle_onboarded") === "1"; } catch { return false; }
   });
@@ -2623,12 +2661,27 @@ export default function OracleDashboard({ onExit }) {
   const [walletBalance, setWalletBalance] = useState(null);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  // Guards against signing in twice for the same address - both the
+  // wallet's own `accountsChanged` event and the explicit post-connect call
+  // in handleWalletConnect fire signInWithWallet, so without this a fresh
+  // connect fetches two different single-use nonces and prompts the wallet
+  // for two separate signatures, and whichever's verify call resolves last
+  // decides the final signedIn state (a race, not "signed in for sure").
+  const signInInFlightRef = useRef(null);
+  // Guards confirmOrder against a double-tap on "Confirm Trade" firing two
+  // concurrent on-chain trade attempts (two signature prompts for one tap).
+  const confirmingOrderRef = useRef(false);
   // null | "claiming" | "claimed" | "already-claimed" | "needs-gas" | "error"
   const [faucetStatus, setFaucetStatus] = useState(null);
   // null | "switching" | "wrong"
   const [networkStatus, setNetworkStatus] = useState(null);
   const [order, setOrder] = useState(null);
   const [orderStatus, setOrderStatus] = useState("confirm");
+  // "onchain" | "offchain" - which path a completed order actually took, so
+  // the "done" screen can be honest about whether a real DreamDEX order was
+  // signed and submitted or this was only recorded in Oracle's own DB (e.g.
+  // wallet connected but not signed in yet).
+  const [orderResultKind, setOrderResultKind] = useState("onchain");
   const [receipt, setReceipt] = useState(null);
   const [liveMarketData, setLiveMarketData] = useState(FALLBACK_MARKETS);
   const [dreamdexMarkets, setDreamdexMarkets] = useState([]);
@@ -2698,6 +2751,41 @@ export default function OracleDashboard({ onExit }) {
     return () => clearInterval(interval);
   }, []);
 
+  // Silently restores wallet state after a page refresh. `wallet`/
+  // `walletAddress`/`signedIn` are plain component state - a refresh wipes
+  // all of it even though the wallet extension is still authorized for this
+  // site and (per api.ts) the JWT from the last sign-in is still sitting in
+  // localStorage. `eth_accounts` (unlike `eth_requestAccounts`) never shows
+  // a wallet popup - it just reports accounts already granted - so this
+  // reconnects with no user action needed, matching how most wallet-enabled
+  // sites behave across refreshes.
+  useEffect(() => {
+    const provider = window.ethereum;
+    if (!provider) return;
+    (async () => {
+      try {
+        const accounts = await provider.request({ method: "eth_accounts" });
+        const addr = accounts?.[0];
+        if (!addr) return;
+        setWallet(shortAddress(addr));
+        setWalletAddress(addr);
+        // Only trust the persisted JWT if it was issued for this exact
+        // address - the wallet may have switched accounts while the site
+        // was closed, and a token for a different wallet must not silently
+        // authenticate the newly-restored one.
+        if (getAuthToken() && getAuthWallet() === addr.toLowerCase()) {
+          setSignedIn(true);
+        } else {
+          setAuthToken(null);
+          setAuthWallet(null);
+        }
+      } catch {
+        // Wallet didn't answer - leave the UI in its default disconnected
+        // state rather than guessing.
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     const provider = window.ethereum;
     if (!provider) return;
@@ -2708,6 +2796,7 @@ export default function OracleDashboard({ onExit }) {
       setWalletAddress(addr);
       setSignedIn(false);
       setAuthToken(null);
+      setAuthWallet(null);
       setFaucetStatus(null);
       setNetworkStatus(null);
       if (!addr) setWalletBalance(null);
@@ -2877,6 +2966,11 @@ export default function OracleDashboard({ onExit }) {
   // DreamDEX/Oracle only exists on the EVM side.
   const signInWithWallet = async (address, provider) => {
     if (!provider) return;
+    // Both the `accountsChanged` listener and handleWalletConnect's explicit
+    // call can reach here for the same freshly-connected address - only the
+    // first one should actually prompt the wallet.
+    if (signInInFlightRef.current === address) return;
+    signInInFlightRef.current = address;
     try {
       const { nonce, message } = await getAuthChallenge(address);
       const signature = await provider.request({
@@ -2892,6 +2986,8 @@ export default function OracleDashboard({ onExit }) {
       // wherever the backend still allows that.
       console.error("Wallet sign-in failed", err);
       setSignedIn(false);
+    } finally {
+      if (signInInFlightRef.current === address) signInInFlightRef.current = null;
     }
   };
 
@@ -2952,82 +3048,94 @@ export default function OracleDashboard({ onExit }) {
   // they keep the old DB-only flow rather than attempting a real trade.
   const confirmOrder = async () => {
     if (!order) return;
-    const canTradeOnChain = signedIn && walletAddress && order.symbol;
+    // A fast double-tap on "Confirm Trade" (common on mobile, especially on
+    // an animated glowing button) otherwise fires two concurrent on-chain
+    // attempts - two signature prompts for what the user experienced as one
+    // tap. Cleared in `finally` so a genuine retry after a failure still works.
+    if (confirmingOrderRef.current) return;
+    confirmingOrderRef.current = true;
+    try {
+      const canTradeOnChain = signedIn && walletAddress && order.symbol;
 
-    if (!canTradeOnChain) {
-      setOrderStatus("pending");
-      try {
-        if (walletAddress) {
-          await createPrediction({
-            wallet: walletAddress,
-            marketId: order.market || `${order.asset}-${order.dir}`,
-            asset: order.asset || "BTC",
-            duration: order.duration || "15M",
-            prediction: order.dir || "UP",
-            entryPrice: order.price ? order.price / 100 : 0.5, // Normalize to 0-1 range
-            username: wallet ? wallet : undefined,
-          });
+      if (!canTradeOnChain) {
+        setOrderStatus("pending");
+        setOrderResultKind("offchain");
+        try {
+          if (walletAddress) {
+            await createPrediction({
+              wallet: walletAddress,
+              marketId: order.market || `${order.asset}-${order.dir}`,
+              asset: order.asset || "BTC",
+              duration: order.duration || "15M",
+              prediction: order.dir || "UP",
+              entryPrice: order.price ? order.price / 100 : 0.5, // Normalize to 0-1 range
+              username: wallet ? wallet : undefined,
+            });
+          }
+          setTimeout(() => setOrderStatus("done"), 1100);
+        } catch (error) {
+          console.error("Failed to record prediction:", error);
+          setOrderStatus("error");
         }
-        setTimeout(() => setOrderStatus("done"), 1100);
+        return;
+      }
+
+      setOrderStatus("awaiting-signature");
+      setOrderResultKind("onchain");
+      let fillResult;
+      try {
+        fillResult = await placeWalletTrade({
+          address: walletAddress,
+          symbol: order.symbol,
+          side: order.dir || "UP",
+          usdStake: order.stake ?? order.amount ?? 10,
+          upOutcome: order.upOutcome,
+        });
+        setOrderStatus("submitted");
       } catch (error) {
-        console.error("Failed to record prediction:", error);
+        // Signature rejected, chain switch declined, RPC failure, etc. - the
+        // trade never happened, so this must read differently from "traded
+        // but our own bookkeeping failed" below.
+        console.error("On-chain trade failed:", error);
+        setOrderStatus("chain-error");
+        // placeWalletTrade already tried its own switch/add-network prompt
+        // (via ensureChain) before ever getting to the signature step - if
+        // that's why this failed, surface the persistent top banner too, not
+        // just this modal's one-off retry button.
+        try {
+          const hex = await window.ethereum?.request({ method: "eth_chainId" });
+          if (hex && parseInt(hex, 16) !== EXPECTED_CHAIN.id) setNetworkStatus("wrong");
+        } catch {
+          // Can't read the chain - leave networkStatus as-is.
+        }
+        return;
+      }
+
+      try {
+        await createPrediction({
+          wallet: walletAddress,
+          marketId: order.symbol,
+          asset: order.asset || "BTC",
+          duration: order.duration || "15M",
+          prediction: order.dir || "UP",
+          // `fillResult` is a real UnifiedOrder here (placeWalletTrade always
+          // passes dryRun: false) - its `price` is the actual crossing price,
+          // already in the market's own 0-1 probability units. `referencePrice`
+          // only exists on backPrediction's dry-run branch, which this call
+          // path never takes, so it was always falling through to the wrong
+          // (raw asset price) fallback below.
+          entryPrice: fillResult?.price ?? (order.price ? order.price / 100 : 0.5),
+          username: wallet ? wallet : undefined,
+        });
+        setOrderStatus("done");
+      } catch (error) {
+        // The trade already landed on-chain - only our own record-keeping
+        // failed, so this is a distinct outcome from a rejected/failed trade.
+        console.error("Trade succeeded on-chain but failed to record it:", error);
         setOrderStatus("error");
       }
-      return;
-    }
-
-    setOrderStatus("awaiting-signature");
-    let fillResult;
-    try {
-      fillResult = await placeWalletTrade({
-        address: walletAddress,
-        symbol: order.symbol,
-        side: order.dir || "UP",
-        usdStake: order.stake ?? order.amount ?? 10,
-        upOutcome: order.upOutcome,
-      });
-      setOrderStatus("submitted");
-    } catch (error) {
-      // Signature rejected, chain switch declined, RPC failure, etc. - the
-      // trade never happened, so this must read differently from "traded
-      // but our own bookkeeping failed" below.
-      console.error("On-chain trade failed:", error);
-      setOrderStatus("chain-error");
-      // placeWalletTrade already tried its own switch/add-network prompt
-      // (via ensureChain) before ever getting to the signature step - if
-      // that's why this failed, surface the persistent top banner too, not
-      // just this modal's one-off retry button.
-      try {
-        const hex = await window.ethereum?.request({ method: "eth_chainId" });
-        if (hex && parseInt(hex, 16) !== EXPECTED_CHAIN.id) setNetworkStatus("wrong");
-      } catch {
-        // Can't read the chain - leave networkStatus as-is.
-      }
-      return;
-    }
-
-    try {
-      await createPrediction({
-        wallet: walletAddress,
-        marketId: order.symbol,
-        asset: order.asset || "BTC",
-        duration: order.duration || "15M",
-        prediction: order.dir || "UP",
-        // `fillResult` is a real UnifiedOrder here (placeWalletTrade always
-        // passes dryRun: false) - its `price` is the actual crossing price,
-        // already in the market's own 0-1 probability units. `referencePrice`
-        // only exists on backPrediction's dry-run branch, which this call
-        // path never takes, so it was always falling through to the wrong
-        // (raw asset price) fallback below.
-        entryPrice: fillResult?.price ?? (order.price ? order.price / 100 : 0.5),
-        username: wallet ? wallet : undefined,
-      });
-      setOrderStatus("done");
-    } catch (error) {
-      // The trade already landed on-chain - only our own record-keeping
-      // failed, so this is a distinct outcome from a rejected/failed trade.
-      console.error("Trade succeeded on-chain but failed to record it:", error);
-      setOrderStatus("error");
+    } finally {
+      confirmingOrderRef.current = false;
     }
   };
   const retryOrder = () => confirmOrder();
@@ -3153,7 +3261,6 @@ export default function OracleDashboard({ onExit }) {
           walletBalance={walletBalance}
           signedIn={signedIn}
           connectWallet={connectWallet}
-          onExit={onExit}
           tickerData={tickerData}
         />
 
@@ -3182,7 +3289,7 @@ export default function OracleDashboard({ onExit }) {
         {view === "battle" && <BattleView />}
       </div>
 
-      <TradeModal order={order} status={orderStatus} onClose={() => setOrder(null)} onConfirm={confirmOrder} onRetry={retryOrder} />
+      <TradeModal order={order} status={orderStatus} resultKind={orderResultKind} onClose={() => setOrder(null)} onConfirm={confirmOrder} onRetry={retryOrder} />
       <PredictionReceipt item={receipt} onClose={() => setReceipt(null)} />
       {walletModalOpen && <WalletModal onConnect={handleWalletConnect} onClose={() => setWalletModalOpen(false)} />}
     </div>

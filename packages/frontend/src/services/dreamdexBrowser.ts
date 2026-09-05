@@ -38,6 +38,24 @@ export const TEST_USDC_TOKEN = {
   decimals: 6,
 } as const;
 
+/**
+ * Some mobile wallet in-app browsers (Rabby's included) occasionally never
+ * surface the native prompt for a `provider.request()` call - the promise
+ * then never resolves or rejects, and the caller hangs forever with no
+ * feedback. Every wallet-facing request in this module goes through this so
+ * a silent wallet fails loudly instead of leaving the UI stuck on "Confirm
+ * the signature in your wallet..." indefinitely.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
 /** Prompts the wallet's own "Add token" dialog (EIP-747) for TestUSDC. */
 export async function addTestUsdcToWallet(provider: EIP1193Provider) {
   return provider.request({
@@ -54,36 +72,52 @@ export async function ensureChain(provider: EIP1193Provider) {
   const { chain } = loadConfig();
   const hexChainId = `0x${chain.id.toString(16)}`;
 
-  const currentChainId = await provider.request({ method: "eth_chainId" });
+  const currentChainId = await withTimeout(
+    provider.request({ method: "eth_chainId" }),
+    10_000,
+    "Wallet didn't respond to a network check - try again",
+  );
   if (currentChainId === hexChainId) return chain;
 
   try {
-    await provider.request({
-      method: "wallet_switchEthereumChain",
-      params: [{ chainId: hexChainId }],
-    });
+    await withTimeout(
+      provider.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: hexChainId }],
+      }),
+      60_000,
+      "Wallet didn't respond to the network switch prompt - open your wallet app and try again",
+    );
   } catch (switchError: any) {
     // 4902: wallet doesn't know this chain yet - register it, then retry the
     // switch (some wallets auto-switch after adding; others don't).
     if (switchError?.code === 4902) {
-      await provider.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: hexChainId,
-            chainName: chain.name,
-            nativeCurrency: chain.nativeCurrency,
-            rpcUrls: [...(chain.rpcUrls.default.http ?? [])],
-            blockExplorerUrls: chain.blockExplorers?.default
-              ? [chain.blockExplorers.default.url]
-              : undefined,
-          },
-        ],
-      });
-      await provider.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: hexChainId }],
-      });
+      await withTimeout(
+        provider.request({
+          method: "wallet_addEthereumChain",
+          params: [
+            {
+              chainId: hexChainId,
+              chainName: chain.name,
+              nativeCurrency: chain.nativeCurrency,
+              rpcUrls: [...(chain.rpcUrls.default.http ?? [])],
+              blockExplorerUrls: chain.blockExplorers?.default
+                ? [chain.blockExplorers.default.url]
+                : undefined,
+            },
+          ],
+        }),
+        60_000,
+        "Wallet didn't respond to the add-network prompt - open your wallet app and try again",
+      );
+      await withTimeout(
+        provider.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: hexChainId }],
+        }),
+        60_000,
+        "Wallet didn't respond to the network switch prompt - open your wallet app and try again",
+      );
     } else {
       throw switchError;
     }
@@ -130,13 +164,17 @@ export async function placeWalletTrade({
 }: WalletTradeParams) {
   const exchange = await buildExchange(address);
   try {
-    return await backPrediction(exchange, {
-      symbol,
-      side,
-      usdStake,
-      upOutcome,
-      dryRun: false,
-    });
+    return await withTimeout(
+      backPrediction(exchange, {
+        symbol,
+        side,
+        usdStake,
+        upOutcome,
+        dryRun: false,
+      }),
+      90_000,
+      "Wallet didn't respond to the signature request - open your wallet app and try again",
+    );
   } finally {
     await closeExchange(exchange);
   }

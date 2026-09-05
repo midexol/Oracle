@@ -95,6 +95,31 @@ const toScored = (rows: Awaited<ReturnType<typeof settledCalls>>): ScoredPredict
     settledAt: r.settledAt ?? new Date(0),
   }));
 
+/**
+ * Calls still awaiting settlement. `settledCalls` (and everything built on
+ * it - stats, score, history) only ever looks at WON/LOST rows, so a fresh
+ * PENDING prediction was invisible everywhere in the product: not in
+ * history, not counted, nothing on the profile to show a trade was ever
+ * recorded. A 1H/4H market can take that long to resolve, so "invisible
+ * until settled" reads as "the trade didn't work."
+ */
+async function pendingCalls(userId: string) {
+  return db
+    .select({
+      id: predictions.id,
+      direction: predictions.direction,
+      entryPriceCents: predictions.entryPriceCents,
+      createdAt: predictions.createdAt,
+      asset: markets.asset,
+      duration: markets.duration,
+      closesAt: markets.closesAt,
+    })
+    .from(predictions)
+    .innerJoin(markets, eq(markets.id, predictions.marketId))
+    .where(and(eq(predictions.userId, userId), eq(predictions.status, 'PENDING')))
+    .orderBy(desc(predictions.createdAt));
+}
+
 // --------------------------------------------------------------- profile
 
 export async function getCompatProfile(handle: string) {
@@ -107,7 +132,7 @@ export async function getCompatProfile(handle: string) {
     .where(eq(userSegmentStats.userId, user.id))
     .orderBy(userSegmentStats.asset, userSegmentStats.duration);
 
-  const calls = await settledCalls(user.id);
+  const [calls, pending] = await Promise.all([settledCalls(user.id), pendingCalls(user.id)]);
 
   const settled = stats?.settledPredictions ?? calls.length;
   const wins = stats?.correctPredictions ?? calls.filter((c) => c.won).length;
@@ -143,6 +168,15 @@ export async function getCompatProfile(handle: string) {
       // Dollars: the UI renders this as `$0.43`.
       price: dollars(c.entryPriceCents),
       resolvedAt: c.settledAt ? c.settledAt.toISOString() : null,
+    })),
+    pending: pending.map((p) => ({
+      id: p.id,
+      market: `${p.asset} ${p.duration}`,
+      asset: p.asset,
+      dir: p.direction,
+      price: dollars(p.entryPriceCents),
+      createdAt: p.createdAt.toISOString(),
+      closesAt: p.closesAt.toISOString(),
     })),
   };
 }

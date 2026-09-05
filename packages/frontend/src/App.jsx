@@ -12,6 +12,6 @@ export default function App() {
   return route === "landing" ? (
     <OracleLanding onLaunch={() => setRoute("app")} />
   ) : (
-    <OracleDashboard onExit={() => setRoute("landing")} />
+    <OracleDashboard />
   );
 }

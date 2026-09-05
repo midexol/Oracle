@@ -316,6 +316,25 @@ export class LiveDreamDexClient implements DreamDexClient {
     this.contracts = new Map(contracts.map((c) => [c.symbol, c]));
     this.contractsFetchedAt = Date.now();
 
+    // `subscribeOrderBook` runs an unconditional `while (!stopped)` loop that
+    // never exits on its own - it must be told to stop. Oracle only tracks
+    // short-duration (1H/4H) BTC/ETH series, so a new contract opens every
+    // cycle or two; without this, every market that has ever closed still
+    // has a live watchOrderBook loop (and whatever the SDK keeps in its
+    // local store per symbol) running forever, growing without bound for
+    // the life of the process. This was the true cause of the 2026-09-04
+    // OOM crash (heap hit its 4GB limit after ~4h) - never confirmed until
+    // now.
+    const stillOpen = new Set(
+      contracts.filter((c) => toMarket(c).status === 'OPEN').map((c) => c.symbol),
+    );
+    for (const [symbol, sub] of this.books) {
+      if (!stillOpen.has(symbol)) {
+        sub.stop();
+        this.books.delete(symbol);
+      }
+    }
+
     // A market whose question we could not parse is one where UP/DOWN may be
     // inverted - which would flip every prediction on it. Surface it loudly
     // rather than letting it settle silently.

@@ -9,6 +9,10 @@ const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api";
 // rather than replacing it (compat routes still back predictions/auth).
 const API_BASE_V1 = API_BASE.replace(/\/api\/?$/, "/api/v1");
 const AUTH_TOKEN_STORAGE_KEY = "oracle:authToken";
+// Paired with the token so a page refresh can tell whether a persisted JWT
+// still belongs to the wallet that's currently connected (the wallet may
+// have switched accounts while the site was closed).
+const AUTH_WALLET_STORAGE_KEY = "oracle:authWallet";
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -36,6 +40,23 @@ export function setAuthToken(token: string | null) {
 
 export function getAuthToken() {
   return authToken;
+}
+
+export function setAuthWallet(address: string | null) {
+  try {
+    if (address) localStorage.setItem(AUTH_WALLET_STORAGE_KEY, address.toLowerCase());
+    else localStorage.removeItem(AUTH_WALLET_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+export function getAuthWallet(): string | null {
+  try {
+    return localStorage.getItem(AUTH_WALLET_STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 async function apiFetch(endpoint: string, options?: RequestInit) {
@@ -145,6 +166,16 @@ export interface ProfileHistoryEntry {
   resolvedAt: string | null;
 }
 
+export interface ProfilePendingEntry {
+  id: string;
+  market: string;
+  asset: string;
+  dir: "UP" | "DOWN";
+  price: number;
+  createdAt: string;
+  closesAt: string;
+}
+
 export interface ProfileCategoryStat {
   label: string;
   asset: string;
@@ -173,6 +204,7 @@ export interface UserProfile {
   credibleInterval90: { lower: number; upper: number };
   categoryBreakdown: ProfileCategoryStat[];
   history: ProfileHistoryEntry[];
+  pending: ProfilePendingEntry[];
 }
 
 export async function getUserProfile(wallet: string): Promise<UserProfile> {
@@ -261,6 +293,7 @@ export async function verifyAuthSignature(payload: VerifyAuthPayload): Promise<A
     body: JSON.stringify(payload),
   });
   setAuthToken(result.token);
+  setAuthWallet(payload.walletAddress);
   return result;
 }
 
