@@ -3055,7 +3055,7 @@ export default function OracleDashboard() {
     if (confirmingOrderRef.current) return;
     confirmingOrderRef.current = true;
     try {
-      const canTradeOnChain = signedIn && walletAddress && order.symbol;
+      const canTradeOnChain = Boolean(walletAddress && order.symbol);
 
       if (!canTradeOnChain) {
         setOrderStatus("pending");

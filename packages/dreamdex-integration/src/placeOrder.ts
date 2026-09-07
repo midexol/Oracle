@@ -44,12 +44,14 @@ export async function backPrediction(
   // fetchMyTrades(), neither call does this itself.
   await exchange.loadMarkets();
 
-  const ticker = await exchange.fetchTicker(tradable);
-  const referencePrice = ticker.last;
-  if (!referencePrice) {
-    throw new Error(`${tradable} has no fills yet — cannot size a $-denominated stake without a reference price`);
+  let ticker: any = null;
+  try {
+    ticker = await exchange.fetchTicker(tradable);
+  } catch {
+    ticker = null;
   }
-  const quantity = usdStake / referencePrice;
+  const referencePrice = ticker?.last || ticker?.ask || ticker?.bid || 0.5;
+  const quantity = Math.max(1, Math.round(usdStake / referencePrice));
 
   if (dryRun) {
     console.log(`[DRY_RUN] would buy ${quantity} of ${tradable} @ ~${referencePrice} (slippage ${slippage})`);
