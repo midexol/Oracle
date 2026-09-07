@@ -21,7 +21,7 @@ function contract(over: Partial<EventContract> = {}): EventContract {
     marketId: '0xabc',
     asset: 'BTC',
     question: 'Will BTC close above $95,000?',
-    strike: '95000',
+    strike: '95000000000000000000000',
     upPrice: 0.43,
     downPrice: 0.57,
     status: 'TRADING',
