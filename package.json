@@ -7,6 +7,7 @@
   "scripts": {
     "postinstall": "npm run build --workspace=@signal/dreamdex-integration --if-present",
     "dev": "npm run dev --workspace=@signal/oracle-backend",
+    "dev:frontend": "npm run dev --workspace=@signal/frontend",
     "dev:postgres": "node scripts/dev-postgres.mjs",
     "dev:dreamdex": "npm run typecheck --workspace=@signal/dreamdex-integration",
     "build": "npm run build --workspace=@signal/dreamdex-integration && npm run build --workspace=@signal/oracle-backend && npm run build --workspace=@signal/frontend --if-present",

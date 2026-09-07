@@ -30,10 +30,11 @@ All raw SDK usage is confined to
 the only package that may import it.
 
 ```mermaid
-graph LR
-    APP["backend modules<br/>jobs · analytics"] --> I{{"DreamDexClient"}}
-    I -.->|"DREAMDEX_MODE=mock"| M["simulator<br/><i>pricing · book · fills · settlement</i>"]
-    I -.->|"DREAMDEX_MODE=live"| L["markets-sdk adapter"] --> C[["Somnia 50312"]]
+flowchart LR
+    APP["backend modules: jobs & analytics"] --> I{{"DreamDexClient"}}
+    I -.->|"DREAMDEX_MODE=mock"| M["simulator: pricing, book, fills, settlement"]
+    I -.->|"DREAMDEX_MODE=live"| L["markets-sdk adapter"]
+    L --> C[["Somnia 50312"]]
     classDef n fill:#1e293b,stroke:#475569,color:#e2e8f0
     class APP,M,L n
 ```

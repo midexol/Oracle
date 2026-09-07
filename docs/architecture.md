@@ -76,45 +76,45 @@ An npm-workspaces monorepo with one hard rule: **nothing outside
 `dreamdex-integration` imports the Somnia SDK.**
 
 ```mermaid
-graph LR
+flowchart LR
     subgraph fe["packages/frontend"]
-        UI["Landing · Dashboard<br/>Charts · Rankings"]
+        UI["Landing / Dashboard / Charts / Rankings"]
         APIC["services/api.ts"]
     end
 
     subgraph be["packages/oracle-backend"]
         direction TB
-        HTTP["server.ts<br/><i>CORS · rate limit · error envelope</i>"]
+        HTTP["server.ts: CORS, rate limit, error envelope"]
 
         subgraph mods["modules/"]
-            AUTH["auth<br/><i>wallet challenge to JWT</i>"]
+            AUTH["auth: wallet challenge to JWT"]
             MKT["markets"]
             PRED["predictions"]
             TRD["trades"]
-            USR["users · battles<br/>leaderboard"]
+            USR["users, battles, leaderboard"]
         end
 
         subgraph ana["analytics/"]
             REP["reputation.ts"]
-            SCO["scoring.ts<br/><i>Wilson · edge · ROI</i>"]
+            SCO["scoring.ts: Wilson, edge, ROI"]
             LB["leaderboard.ts"]
             CONF["confidence.ts"]
         end
 
         subgraph jobs["jobs/"]
-            BR["bridge<br/><i>events to writes</i>"]
-            RES["resolver<br/><i>settlement sweep</i>"]
-            RECO["reconciler<br/><i>order sweep</i>"]
+            BR["bridge: events to writes"]
+            RES["resolver: settlement sweep"]
+            RECO["reconciler: order sweep"]
         end
 
-        RT["realtime/hub.ts<br/><i>WebSocket fan-out</i>"]
-        DB[("Postgres<br/><i>Drizzle</i>")]
+        RT["realtime/hub.ts: WebSocket fan-out"]
+        DB[("Postgres / Drizzle")]
     end
 
     subgraph di["dreamdex boundary"]
-        IFACE["DreamDexClient<br/><i>one interface</i>"]
-        MOCK["mock<br/><i>full simulator</i>"]
-        LIVE["live<br/><i>markets-sdk adapter</i>"]
+        IFACE["DreamDexClient: one interface"]
+        MOCK["mock: full simulator"]
+        LIVE["live: markets-sdk adapter"]
     end
 
     UI --> APIC --> HTTP --> mods
@@ -126,7 +126,7 @@ graph LR
     jobs --> IFACE
     IFACE -.-> MOCK
     IFACE -.-> LIVE
-    LIVE --> CHAIN[["Somnia<br/>chain 50312"]]
+    LIVE --> CHAIN[["Somnia chain 50312"]]
 
     classDef box fill:#1e293b,stroke:#475569,color:#e2e8f0
     class UI,APIC,HTTP,AUTH,MKT,PRED,TRD,USR,REP,SCO,LB,CONF,BR,RES,RECO,RT box
@@ -134,38 +134,23 @@ graph LR
 
 | Package | Owns | Entry point |
 |---|---|---|
-| [`dreamdex-integration`](../packages/dreamdex-integration) | Markets, order book, order placement, fills, settlement, redemption | [`src/index.ts`](../packages/dreamdex-integration/src/index.ts) |
-| [`oracle-backend`](../packages/oracle-backend) | REST + WS API, schema, settlement pipeline, reputation | [`src/server.ts`](../packages/oracle-backend/src/server.ts) |
-| [`frontend`](../packages/frontend) | Feed, market, profile, rankings UI | [`src/App.jsx`](../packages/frontend/src/App.jsx) |
-
-### The mock/live seam
-
-`DREAMDEX_MODE` selects the implementation behind one interface
-([`src/dreamdex/types.ts`](../packages/oracle-backend/src/dreamdex/types.ts)):
-
-- **`mock`** — a real simulator, not a stub. Rolling contract series, binary
-  option pricing that converges to 1c/99c at expiry, an order book, async fills
-  delivered as simulated `OrderFilled` events, and settlement. The whole
-  product is demoable with no testnet funds and no network.
-- **`live`** — an adapter over `@somnia-chain/markets-sdk` against Somnia
-  Shannon testnet (`50312`).
-
-Both are exercised by the same test suite, which is what makes the seam worth
-having — see [ADR-0002](adr/0002-single-dreamdex-boundary.md).
+| [`@signal/dreamdex-integration`](../packages/dreamdex-integration) | The only package that imports `@somnia-chain/markets-sdk`. Exposes `DreamDexClient`, order types, settlement helpers, and a standalone CLI | `src/index.ts` |
+| [`@signal/oracle-backend`](../packages/oracle-backend) | API, Postgres schema, settlement pipeline, reputation engine | `src/index.ts` |
+| [`@signal/frontend`](../packages/frontend) | React UI (Vite) | `src/App.jsx` |
 
 ---
 
-## 3. The core loop
+## 3. The core loop and originated volume
 
 Everything in the product exists to close this loop. Break any arrow and
 Oracle is just a feed.
 
 ```mermaid
-graph LR
-    P["Predict<br/><i>price-anchored call</i>"] --> B["Back it<br/><i>real DreamDEX order</i>"]
-    B --> S["Settle<br/><i>oracle posts outcome</i>"]
-    S --> R["Reputation<br/><i>Wilson score moves</i>"]
-    R --> C["Compete<br/><i>leaderboard reorders</i>"]
+flowchart LR
+    P["Predict: price-anchored call"] --> B["Back it: real DreamDEX order"]
+    B --> S["Settle: oracle posts outcome"]
+    S --> R["Reputation: Wilson score moves"]
+    R --> C["Compete: leaderboard reorders"]
     C --> P
 
     classDef n fill:#1e3a8a,stroke:#60a5fa,color:#ffffff
@@ -198,7 +183,7 @@ sequenceDiagram
     U->>FE: Back this prediction, $10
     FE->>API: POST /trades (Idempotency-Key, JWT)
     API->>DB: insert trade PENDING with clientOrderId
-    Note over API,DB: our row first — a lost order<br/>is worse than a stale row
+    Note over API,DB: Our row first: a lost order is worse than a stale row
     API->>DX: place taker order, sized from stake
     DX-->>API: accepted, dreamdexOrderId
     API->>DB: attach order id
@@ -225,7 +210,7 @@ the ingestion rules readable in one file.
 
 ```mermaid
 flowchart TB
-    subgraph stream["Live event stream — the fast path"]
+    subgraph stream["Live event stream: fast path"]
         E1["market opened"] --> BR
         E2["quote"] --> BR
         E3["trade"] --> BR
@@ -234,10 +219,10 @@ flowchart TB
         BR{{"bridge.ts"}}
     end
 
-    subgraph sweeps["Periodic sweeps — the repair path"]
-        SY["marketSync<br/><i>full reconciliation</i>"]
-        RS["resolver<br/><i>unsettled markets</i>"]
-        RC["reconciler<br/><i>open orders, PnL backfill</i>"]
+    subgraph sweeps["Periodic sweeps: repair path"]
+        SY["marketSync: full reconciliation"]
+        RS["resolver: unsettled markets"]
+        RC["reconciler: open orders, PnL backfill"]
     end
 
     W["writes"]
@@ -251,23 +236,18 @@ flowchart TB
     RS --> PIPE
     W --> DB
 
-    subgraph steps["resolveMarket — the order is not arbitrary"]
+    subgraph steps["resolveMarket order"]
         direction TB
-        S1["1 · record market outcome"] --> S2["2 · settle predictions<br/>PENDING to WON/LOST, write receipts"]
-        S2 --> S3["3 · settle trades, realise PnL"]
-        S3 --> S4["4 · settle battles, declare winner"]
-        S4 --> S5["5 · recompute reputation"]
-        S5 --> S6["6 · broadcast feed, market, leaderboard"]
+        S1["1: record market outcome"] --> S2["2: settle predictions (PENDING to WON/LOST, write receipts)"]
+        S2 --> S3["3: settle trades, realise PnL"]
+        S3 --> S4["4: settle battles, declare winner"]
+        S4 --> S5["5: recompute reputation"]
+        S5 --> S6["6: broadcast feed, market, leaderboard"]
     end
 
     PIPE --> steps
     steps --> DB
     S6 --> HUB(["WebSocket hub"])
-
-    classDef ev fill:#1e293b,stroke:#475569,color:#cbd5e1
-    classDef st fill:#14532d,stroke:#22c55e,color:#dcfce7
-    class E1,E2,E3,E4,E5 ev
-    class S1,S2,S3,S4,S5,S6 st
 ```
 
 Reputation is recomputed **last** because it reads rows the earlier steps
@@ -339,9 +319,9 @@ These are the invariants the design is actually built around.
 ## 8. Deployment
 
 ```mermaid
-graph LR
-    V["Vercel<br/><i>frontend</i>"] -->|REST · WSS| D["Docker<br/><i>oracle-backend</i>"]
-    D --> PG[("Postgres<br/><i>Neon / Supabase</i>")]
+flowchart LR
+    V["Vercel Frontend"] -->|REST / WSS| D["Docker oracle-backend"]
+    D --> PG[("Postgres: Neon / Supabase")]
     D -->|RPC| SOM[["Somnia 50312"]]
 ```
 

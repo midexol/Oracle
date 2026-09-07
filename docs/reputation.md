@@ -8,12 +8,16 @@ reason a track record is worth trading on.
 
 ```mermaid
 flowchart LR
-    P[("predictions<br/><i>source of truth</i>")] -->|"settled only"| C["computeReputation<br/><i>pure</i>"]
-    C --> S1["score<br/><i>0..100 headline</i>"]
-    C --> S2["edge<br/><i>vs the market</i>"]
-    C --> S3["roi<br/><i>in cents</i>"]
+    P[("predictions (source of truth)")] -->|"settled only"| C["computeReputation (pure)"]
+    C --> S1["score: 0..100 headline"]
+    C --> S2["edge: vs the market"]
+    C --> S3["roi: in cents"]
     C --> S4["streaks"]
-    S1 & S2 & S3 & S4 --> ST[("user_stats<br/>user_segment_stats<br/><i>cache, rebuildable</i>")]
+    S1 --> ST
+    S2 --> ST
+    S3 --> ST
+    S4 --> ST
+    ST[("user_stats / user_segment_stats (rebuildable cache)")]
     ST --> LB["leaderboards"]
     ST --> PR["profiles"]
 

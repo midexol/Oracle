@@ -29,11 +29,11 @@ Users discover predictions, back them with real trades, compete for reputation,
 and build a verifiable track record. Every arrow is implemented.
 
 ```mermaid
-graph LR
-    P["Predict<br/><i>price-anchored call</i>"] --> B["Back it<br/><i>real DreamDEX order</i>"]
-    B --> S["Settle<br/><i>oracle posts outcome</i>"]
-    S --> R["Reputation<br/><i>Wilson score moves</i>"]
-    R --> C["Compete<br/><i>leaderboard reorders</i>"]
+flowchart LR
+    P["Predict: price-anchored call"] --> B["Back it: real DreamDEX order"]
+    B --> S["Settle: oracle posts outcome"]
+    S --> R["Reputation: Wilson score moves"]
+    R --> C["Compete: leaderboard reorders"]
     C --> P
 
     classDef n fill:#1e3a8a,stroke:#60a5fa,color:#ffffff
@@ -47,25 +47,26 @@ to the exchange rather than merely displaying it.
 ## How it fits together
 
 ```mermaid
-graph TB
-    U["Predictor<br/><i>own wallet, own keys</i>"]
+flowchart TB
+    U["Predictor: own wallet & keys"]
 
-    subgraph oracle["Oracle — this repository"]
-        FE["Frontend<br/><i>React + Vite</i>"]
-        BE["Backend API<br/><i>Fastify + Postgres</i>"]
-        DDX["dreamdex-integration<br/><i>the only SDK importer</i>"]
+    subgraph oracle["Oracle Workspace"]
+        FE["Frontend: React + Vite"]
+        BE["Backend API: Fastify + Postgres"]
+        DDX["dreamdex-integration: SDK importer"]
     end
 
-    subgraph somnia["Somnia — DreamDEX Event Contracts"]
+    subgraph somnia["Somnia: DreamDEX Event Contracts"]
         MC["MarketsCore"]
-        OH["OracleHub<br/><i>resolution</i>"]
-        BS["BinarySettlement<br/><i>payout</i>"]
+        OH["OracleHub: resolution"]
+        BS["BinarySettlement: payout"]
     end
 
     U -->|"feed, follows, rankings"| FE
-    U -->|"signs orders in their own wallet"| MC
+    U -->|"signs orders in own wallet"| MC
     FE -->|"REST + WebSocket"| BE
-    BE --> DDX --> MC
+    BE --> DDX
+    DDX --> MC
     MC --- OH
     MC --- BS
 
@@ -97,6 +98,7 @@ cp packages/oracle-backend/.env.example packages/oracle-backend/.env
 npm run db:migrate
 npm run db:seed        # optional: a populated feed and leaderboard
 npm run dev            # API on http://localhost:4000
+npm run dev:frontend   # UI on http://localhost:5173
 ```
 
 ```bash
@@ -123,7 +125,8 @@ Run from the repo root; each delegates to the right workspace.
 
 | Command | Does |
 |---|---|
-| `npm run dev` | Backend in watch mode |
+| `npm run dev` | Backend in watch mode (`http://localhost:4000`) |
+| `npm run dev:frontend` | Frontend UI in dev mode (`http://localhost:5173`) |
 | `npm run build` | Build every package |
 | `npm run typecheck` | Typecheck every package |
 | `npm test` | Unit tests across all packages |
